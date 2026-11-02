@@ -37,6 +37,8 @@ const Uint8ArrayReader = /** @type {typeof import('@zip.js/zip.js').Uint8ArrayRe
 const ZipReader = /** @type {typeof import('@zip.js/zip.js').ZipReader} */ (/** @type {unknown} */ (ZipReader0));
 
 const INDEX_FILE_NAME = 'index.json';
+/** How many images are measured at once. */
+const IMAGE_MEASURE_CONCURRENCY = 32;
 
 export class DictionaryImporter {
     /**
@@ -121,14 +123,7 @@ export class DictionaryImporter {
         // Read the sizes of the images the glossaries show, then store the dictionary
         this._progressNextStep(report.images.length + 1);
 
-        /** @type {{[path: string]: [width: number, height: number]}} */
-        const media = {};
-        for (const {path, expression, reading} of report.images) {
-            const {width, height} = await this._getImageDetails(fileMap, path, expression, reading, dictionaryTitle);
-            media[path] = [width, height];
-            ++this._progressData.index;
-            this._progress();
-        }
+        const media = await this._getImageSizes(fileMap, report.images, dictionaryTitle);
 
         const summary = this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles: report.styles, yomitanVersion, importSuccess: true});
         await dictionaryDatabase.addDictionary(files, {summary, media, tags});
@@ -350,6 +345,54 @@ export class DictionaryImporter {
     }
 
     /**
+     * Finds the size of each image. hoshidicts reads most from their headers; the others are decoded by
+     * the page that started the import, a round trip from this worker, so several are decoded at once.
+     * @param {import('dictionary-importer').ArchiveFileMap} fileMap
+     * @param {import('hoshidicts').ImportImage[]} images
+     * @param {string} dictionary
+     * @returns {Promise<{[path: string]: [width: number, height: number]}>}
+     * @throws {Error}
+     */
+    async _getImageSizes(fileMap, images, dictionary) {
+        /** @type {[width: number, height: number][]} */
+        const sizes = new Array(images.length);
+        let next = 0;
+        let failed = false;
+        const measure = async () => {
+            while (!failed && next < images.length) {
+                const index = next++;
+                const {path, expression, reading, width, height} = images[index];
+                try {
+                    if (width > 0 && height > 0) {
+                        this._validateImageMediaType(path, expression, reading, dictionary);
+                        sizes[index] = [width, height];
+                    } else {
+                        const details = await this._getImageDetails(fileMap, path, expression, reading, dictionary);
+                        sizes[index] = [details.width, details.height];
+                    }
+                } catch (e) {
+                    failed = true;
+                    throw e;
+                }
+                ++this._progressData.index;
+                this._progress();
+            }
+        };
+        const measurers = [];
+        for (let i = 0, ii = Math.min(IMAGE_MEASURE_CONCURRENCY, images.length); i < ii; ++i) {
+            measurers.push(measure());
+        }
+        await Promise.all(measurers);
+
+        /** @type {{[path: string]: [width: number, height: number]}} */
+        const media = {};
+        for (let i = 0, ii = images.length; i < ii; ++i) {
+            media[images[i].path] = sizes[i];
+        }
+        return media;
+    }
+
+    /**
      * @param {import('dictionary-importer').ArchiveFileMap} fileMap
      * @param {string} path
      * @param {string} expression The expression of the first term row that shows the image.
@@ -359,32 +402,49 @@ export class DictionaryImporter {
      * @throws {Error}
      */
     async _getImageDetails(fileMap, path, expression, reading, dictionary) {
-        /**
-         * @param {string} message
-         * @returns {Error}
-         */
-        const createError = (message) => {
-            const readingSource = reading.length > 0 ? reading : expression;
-            return new Error(`${message} at path ${JSON.stringify(path)} for ${expression}${readingSource.length > 0 ? ` (${readingSource})` : ''} in ${dictionary}`);
-        };
-
         const file = fileMap.get(path);
         if (typeof file === 'undefined') {
-            throw createError('Could not find image');
+            throw this._createImageError('Could not find image', path, expression, reading, dictionary);
         }
         const content = await (await this._getData(file, new BlobWriter())).arrayBuffer();
 
-        const mediaType = getImageMediaTypeFromFileName(path);
-        if (mediaType === null) {
-            throw createError('Could not determine media type for image');
-        }
+        const mediaType = this._validateImageMediaType(path, expression, reading, dictionary);
 
         try {
             const {width, height} = await this._mediaLoader.getImageDetails(content, mediaType);
             return {width, height};
         } catch (e) {
-            throw createError('Could not load image');
+            throw this._createImageError('Could not load image', path, expression, reading, dictionary);
         }
+    }
+
+    /**
+     * @param {string} path
+     * @param {string} expression
+     * @param {string} reading
+     * @param {string} dictionary
+     * @returns {string} The image's media type.
+     * @throws {Error}
+     */
+    _validateImageMediaType(path, expression, reading, dictionary) {
+        const mediaType = getImageMediaTypeFromFileName(path);
+        if (mediaType === null) {
+            throw this._createImageError('Could not determine media type for image', path, expression, reading, dictionary);
+        }
+        return mediaType;
+    }
+
+    /**
+     * @param {string} message
+     * @param {string} path
+     * @param {string} expression The expression of the first term row that shows the image.
+     * @param {string} reading The reading of that row.
+     * @param {string} dictionary
+     * @returns {Error}
+     */
+    _createImageError(message, path, expression, reading, dictionary) {
+        const readingSource = reading.length > 0 ? reading : expression;
+        return new Error(`${message} at path ${JSON.stringify(path)} for ${expression}${readingSource.length > 0 ? ` (${readingSource})` : ''} in ${dictionary}`);
     }
 
     /**

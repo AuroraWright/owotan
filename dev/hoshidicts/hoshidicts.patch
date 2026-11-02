@@ -1,8 +1,20 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f01d096..2c151b1 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -80,6 +80,7 @@ add_library(hoshidicts
+     src/hash/hash.cpp
+     src/hash/bloom.cpp
+     src/importer.cpp
++    src/image_size.cpp
+     src/memory/memory.cpp
+     src/memory/page_cache.cpp
+     src/blob_file.cpp
 diff --git a/include/hoshidicts/importer.hpp b/include/hoshidicts/importer.hpp
-index c61d2f7..0529ea4 100644
+index c61d2f7..7583ba5 100644
 --- a/include/hoshidicts/importer.hpp
 +++ b/include/hoshidicts/importer.hpp
-@@ -71,12 +71,21 @@ struct ImportWarnings {
+@@ -71,12 +71,25 @@ struct ImportWarnings {
    size_t unreadableResources = 0;
  };
  
@@ -11,6 +23,10 @@ index c61d2f7..0529ea4 100644
 +  std::string path;
 +  std::string expression;
 +  std::string reading;
++  // The size its header gives, or 0 when the header does not settle it (see
++  // image_size::read) or the archive does not hold the image.
++  uint32_t width = 0;
++  uint32_t height = 0;
 +};
 +
  struct ImportResult {
@@ -104,11 +120,317 @@ index dba519f..a7f3ed9 100644
  
    std::vector<char> get_media_file(const std::string& dict_name, const std::string& media_path) const;
    // A view into the mapped media.bin; empty when the file is missing and when
+diff --git a/src/image_size.cpp b/src/image_size.cpp
+new file mode 100644
+index 0000000..ea4e983
+--- /dev/null
++++ b/src/image_size.cpp
+@@ -0,0 +1,268 @@
++#include "image_size.hpp"
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++#include <string_view>
++#include <vector>
++
++namespace {
++uint32_t byte(std::string_view data, size_t at) { return static_cast<uint8_t>(data[at]); }
++
++uint32_t be16(std::string_view data, size_t at) { return (byte(data, at) << 8) | byte(data, at + 1); }
++
++uint32_t be32(std::string_view data, size_t at) { return (be16(data, at) << 16) | be16(data, at + 2); }
++
++uint32_t le16(std::string_view data, size_t at) { return byte(data, at) | (byte(data, at + 1) << 8); }
++
++uint32_t le24(std::string_view data, size_t at) { return le16(data, at) | (byte(data, at + 2) << 16); }
++
++uint32_t le32(std::string_view data, size_t at) { return le16(data, at) | (le16(data, at + 2) << 16); }
++
++std::optional<ImageSize> sized(uint32_t width, uint32_t height) {
++  if (width == 0 || height == 0) {
++    return std::nullopt;
++  }
++  return ImageSize{width, height};
++}
++
++std::optional<ImageSize> read_png(std::string_view data) {
++  // The IHDR chunk comes first. An eXIf chunk before the image data may rotate it.
++  if (data.size() < 24 || data.substr(12, 4) != "IHDR") {
++    return std::nullopt;
++  }
++  const uint32_t width = be32(data, 16);
++  const uint32_t height = be32(data, 20);
++  for (size_t at = 8; at + 8 <= data.size();) {
++    const std::string_view type = data.substr(at + 4, 4);
++    if (type == "eXIf") {
++      return std::nullopt;
++    }
++    if (type == "IDAT") {
++      break;
++    }
++    at += 12 + static_cast<size_t>(be32(data, at));
++  }
++  return sized(width, height);
++}
++
++std::optional<ImageSize> read_gif(std::string_view data) {
++  if (data.size() < 10) {
++    return std::nullopt;
++  }
++  return sized(le16(data, 6), le16(data, 8));
++}
++
++std::optional<ImageSize> read_jpeg(std::string_view data) {
++  for (size_t at = 2; at + 4 <= data.size();) {
++    if (byte(data, at) != 0xFF) {
++      return std::nullopt;
++    }
++    const uint32_t marker = byte(data, at + 1);
++    if (marker == 0xFF) {
++      ++at;
++      continue;
++    }
++    if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD8)) {
++      at += 2;
++      continue;
++    }
++    const size_t length = be16(data, at + 2);
++    if (length < 2) {
++      return std::nullopt;
++    }
++    if (marker == 0xE1 && data.substr(at + 4, 6) == std::string_view("Exif\0\0", 6)) {
++      return std::nullopt;
++    }
++    const bool frame = marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC;
++    if (frame) {
++      if (at + 9 > data.size()) {
++        return std::nullopt;
++      }
++      return sized(be16(data, at + 7), be16(data, at + 5));
++    }
++    at += 2 + length;
++  }
++  return std::nullopt;
++}
++
++std::optional<ImageSize> read_webp(std::string_view data) {
++  if (data.size() < 30 || data.substr(8, 4) != "WEBP") {
++    return std::nullopt;
++  }
++  const std::string_view chunk = data.substr(12, 4);
++  if (chunk == "VP8 ") {
++    if (byte(data, 23) != 0x9D || byte(data, 24) != 0x01 || byte(data, 25) != 0x2A) {
++      return std::nullopt;
++    }
++    return sized(le16(data, 26) & 0x3FFF, le16(data, 28) & 0x3FFF);
++  }
++  if (chunk == "VP8L") {
++    if (byte(data, 20) != 0x2F) {
++      return std::nullopt;
++    }
++    const uint32_t bits = le32(data, 21);
++    return sized((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1);
++  }
++  if (chunk == "VP8X") {
++    constexpr uint32_t exif_flag = 0x08;
++    if ((byte(data, 20) & exif_flag) != 0) {
++      return std::nullopt;
++    }
++    return sized(le24(data, 24) + 1, le24(data, 27) + 1);
++  }
++  return std::nullopt;
++}
++
++std::optional<ImageSize> read_bmp(std::string_view data) {
++  if (data.size() < 26) {
++    return std::nullopt;
++  }
++  if (le32(data, 14) == 12) {
++    return sized(le16(data, 18), le16(data, 20));
++  }
++  const auto height = static_cast<int32_t>(le32(data, 22));
++  return sized(le32(data, 18), static_cast<uint32_t>(height < 0 ? -static_cast<int64_t>(height) : height));
++}
++
++// An ISOBMFF box: its type and contents.
++struct Box {
++  std::string_view type;
++  std::string_view body;
++};
++
++std::vector<Box> read_boxes(std::string_view data) {
++  std::vector<Box> boxes;
++  for (size_t at = 0; at + 8 <= data.size();) {
++    uint64_t size = be32(data, at);
++    size_t header = 8;
++    if (size == 1) {
++      if (at + 16 > data.size()) {
++        break;
++      }
++      size = (static_cast<uint64_t>(be32(data, at + 8)) << 32) | be32(data, at + 12);
++      header = 16;
++    } else if (size == 0) {
++      size = data.size() - at;
++    }
++    if (size < header || size > data.size() - at) {
++      break;
++    }
++    boxes.push_back({data.substr(at + 4, 4), data.substr(at + header, static_cast<size_t>(size) - header)});
++    at += static_cast<size_t>(size);
++  }
++  return boxes;
++}
++
++const Box* find_box(const std::vector<Box>& boxes, std::string_view type) {
++  for (const auto& box : boxes) {
++    if (box.type == type) {
++      return &box;
++    }
++  }
++  return nullptr;
++}
++
++// The primary item's ispe, the image's size, unless another of its properties
++// changes the shown size.
++std::optional<ImageSize> read_avif(std::string_view data) {
++  const auto top = read_boxes(data);
++  const Box* meta = find_box(top, "meta");
++  if (meta == nullptr || meta->body.size() < 4) {
++    return std::nullopt;
++  }
++  const auto meta_boxes = read_boxes(meta->body.substr(4));
++  const Box* pitm = find_box(meta_boxes, "pitm");
++  const Box* iprp = find_box(meta_boxes, "iprp");
++  if (pitm == nullptr || iprp == nullptr || pitm->body.size() < 6) {
++    return std::nullopt;
++  }
++  const bool wide_item = byte(pitm->body, 0) != 0;
++  if (wide_item && pitm->body.size() < 8) {
++    return std::nullopt;
++  }
++  const uint32_t primary = wide_item ? be32(pitm->body, 4) : be16(pitm->body, 4);
++  const auto iprp_boxes = read_boxes(iprp->body);
++  const Box* ipco = find_box(iprp_boxes, "ipco");
++  if (ipco == nullptr) {
++    return std::nullopt;
++  }
++  const auto properties = read_boxes(ipco->body);
++
++  std::optional<ImageSize> size;
++  bool rotated = false;
++  for (const auto& ipma : iprp_boxes) {
++    if (ipma.type != "ipma" || ipma.body.size() < 8) {
++      continue;
++    }
++    const std::string_view body = ipma.body;
++    const uint32_t version = byte(body, 0);
++    const bool wide_index = (byte(body, 3) & 1) != 0;
++    const uint32_t count = be32(body, 4);
++    size_t at = 8;
++    for (uint32_t i = 0; i < count; ++i) {
++      if (at + (version < 1 ? 3 : 5) > body.size()) {
++        return std::nullopt;
++      }
++      const uint32_t item = version < 1 ? be16(body, at) : be32(body, at);
++      at += version < 1 ? 2 : 4;
++      const uint32_t associations = byte(body, at++);
++      for (uint32_t j = 0; j < associations; ++j) {
++        if (at + (wide_index ? 2 : 1) > body.size()) {
++          return std::nullopt;
++        }
++        const uint32_t index = wide_index ? (be16(body, at) & 0x7FFF) : (byte(body, at) & 0x7F);
++        at += wide_index ? 2 : 1;
++        if (item != primary || index == 0 || index > properties.size()) {
++          continue;
++        }
++        const Box& property = properties[index - 1];
++        if (property.type == "ispe" && property.body.size() >= 12) {
++          size = sized(be32(property.body, 4), be32(property.body, 8));
++        } else if (property.type == "irot" && !property.body.empty()) {
++          rotated = (byte(property.body, 0) & 1) != 0;
++        } else if (property.type == "clap") {
++          return std::nullopt;
++        } else if (property.type == "pasp" && property.body.size() >= 8 &&
++                   be32(property.body, 0) != be32(property.body, 4)) {
++          return std::nullopt;
++        }
++      }
++    }
++  }
++  if (size.has_value() && rotated) {
++    return ImageSize{size->height, size->width};
++  }
++  return size;
++}
++}  // namespace
++
++std::optional<ImageSize> image_size::read(std::string_view data) {
++  if (data.starts_with("\x89PNG\r\n\x1A\n")) {
++    return read_png(data);
++  }
++  if (data.starts_with("GIF87a") || data.starts_with("GIF89a")) {
++    return read_gif(data);
++  }
++  if (data.starts_with("\xFF\xD8")) {
++    return read_jpeg(data);
++  }
++  if (data.starts_with("RIFF")) {
++    return read_webp(data);
++  }
++  if (data.starts_with("BM")) {
++    return read_bmp(data);
++  }
++  if (data.size() >= 16 && data.substr(4, 4) == "ftyp") {
++    // The major brand, then after the minor version the compatible brands.
++    const size_t end = std::min<size_t>(be32(data, 0), data.size());
++    for (size_t at = 8; at + 4 <= end; at += at == 8 ? 8 : 4) {
++      const std::string_view brand = data.substr(at, 4);
++      if (brand == "avif" || brand == "avis") {
++        return read_avif(data);
++      }
++    }
++  }
++  return std::nullopt;
++}
+diff --git a/src/image_size.hpp b/src/image_size.hpp
+new file mode 100644
+index 0000000..017f824
+--- /dev/null
++++ b/src/image_size.hpp
+@@ -0,0 +1,18 @@
++#pragma once
++
++#include <cstdint>
++#include <optional>
++#include <string_view>
++
++struct ImageSize {
++  uint32_t width = 0;
++  uint32_t height = 0;
++};
++
++namespace image_size {
++// The size a browser shows an image at, read from its header without decoding
++// it: PNG, GIF, JPEG, WebP, BMP and AVIF. Empty for any other format, a header
++// that does not parse, and an image whose shown size the header alone does not
++// settle: EXIF orientation, or an AVIF crop, rotation or non-square pixels.
++std::optional<ImageSize> read(std::string_view data);
++}  // namespace image_size
 diff --git a/src/importer.cpp b/src/importer.cpp
-index 75a971e..7c4eae9 100644
+index 75a971e..6ee3139 100644
 --- a/src/importer.cpp
 +++ b/src/importer.cpp
-@@ -158,6 +158,8 @@ struct ProcessedFile {
+@@ -29,6 +29,7 @@
+ 
+ #include "hash/bloom.hpp"
+ #include "hash/hash.hpp"
++#include "image_size.hpp"
+ #include "json/yomitan_parser.hpp"
+ #include "path_utils.hpp"
+ #include "mdict/mdict_reader.hpp"
+@@ -158,6 +159,8 @@ struct ProcessedFile {
    ankerl::unordered_dense::map<uint64_t, GlossarySpan> glossaries;
    std::vector<std::pair<uint64_t, uint64_t>> glossary_offsets;
    SummaryMetaCount meta_counts;
@@ -117,7 +439,7 @@ index 75a971e..7c4eae9 100644
    size_t count = 0;
    // (prefix hash, code point length) of every expression or reading longer
    // than scan_index::long_key_min_codepoints; see scan_index.hpp.
-@@ -176,8 +178,18 @@ void note_long_key(std::vector<std::pair<uint64_t, uint16_t>>& long_keys, std::s
+@@ -176,8 +179,18 @@ void note_long_key(std::vector<std::pair<uint64_t, uint16_t>>& long_keys, std::s
    }
  }
  
@@ -136,7 +458,7 @@ index 75a971e..7c4eae9 100644
  bool is_bank_or_meta(const std::string& name) {
    return name.starts_with("term_bank_") || name.starts_with("term_meta_bank_") || name.starts_with("kanji_bank_") ||
           name.starts_with("kanji_meta_bank_") || name.starts_with("tag_bank_") || name == "styles.css" ||
-@@ -400,15 +412,12 @@ std::vector<char> train_zstd_dict(const DictionarySource& source, const Files& f
+@@ -400,15 +413,12 @@ std::vector<char> train_zstd_dict(const DictionarySource& source, const Files& f
    return dict;
  }
  
@@ -155,7 +477,7 @@ index 75a971e..7c4eae9 100644
    }
  
    ZSTD_CCtx* cctx = ZSTD_createCCtx();
-@@ -423,8 +432,21 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+@@ -423,8 +433,21 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
    // Records hold the bank's non-glossary strings plus fixed headers.
    processed.data.reserve(content.size() / 4);
    processed.offsets.reserve(out.size() * 2);
@@ -177,7 +499,7 @@ index 75a971e..7c4eae9 100644
      uint64_t glossary_hash = XXH3_64bits(glossary.data(), glossary.size());
      auto [it, inserted] = processed.glossaries.try_emplace(glossary_hash);
      if (inserted) {
-@@ -468,17 +490,41 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+@@ -468,17 +491,41 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
      write_str(processed.data, term.rules);
      write_val<uint8_t>(processed.data, term.term_tags.size());
      write_str(processed.data, term.term_tags);
@@ -221,7 +543,7 @@ index 75a971e..7c4eae9 100644
      processed.count++;
    }
    ZSTD_freeCCtx(cctx);
-@@ -488,15 +534,11 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+@@ -488,15 +535,11 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
  
  // Term and kanji meta rows share one layout; `record_type` (1 for a term, 3 for
  // a kanji) keeps a kanji's frequency from answering a term with the same text.
@@ -239,7 +561,7 @@ index 75a971e..7c4eae9 100644
    }
  
    // The records repeat the bank's strings with fixed headers, so the bank's
-@@ -504,6 +546,10 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
+@@ -504,6 +547,10 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
    processed.data.reserve(content.size());
    processed.offsets.reserve(out.size());
    for (auto& meta : out) {
@@ -250,7 +572,7 @@ index 75a971e..7c4eae9 100644
      uint64_t offset = processed.data.size();
      std::string_view expr = meta.expression;
      std::string_view mode = meta.mode;
-@@ -526,20 +572,19 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
+@@ -526,20 +573,19 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
    return processed;
  }
  
@@ -276,7 +598,7 @@ index 75a971e..7c4eae9 100644
      uint64_t offset = processed.data.size();
      std::string_view character = kanji.character;
      std::string_view onyomi = kanji.onyomi;
-@@ -590,14 +635,17 @@ size_t count_json_array(const std::string& content) {
+@@ -590,14 +636,17 @@ size_t count_json_array(const std::string& content) {
  }
  
  void count_unprocessed_banks(const DictionarySource& source, const Files& files, ImportResult& result) {
@@ -297,7 +619,7 @@ index 75a971e..7c4eae9 100644
      }
      for (auto& tag : tags) {
        result.summary.tags.push_back(
-@@ -660,7 +708,7 @@ using LongKeyIndex = ankerl::unordered_dense::map<uint64_t, uint16_t>;
+@@ -660,7 +709,7 @@ using LongKeyIndex = ankerl::unordered_dense::map<uint64_t, uint16_t>;
  void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>& offsets,
                   const DictionarySource& source, const std::vector<int>& files, uint64_t& write_offset,
                   ImportResult& result, bool low_ram, const ZSTD_CDict* cdict, WorkerPool& pool,
@@ -306,7 +628,7 @@ index 75a971e..7c4eae9 100644
    if (files.empty()) {
      return;
    }
-@@ -669,7 +717,13 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -669,7 +718,13 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
    std::deque<std::future<ProcessedFile>> threads;
  
    ankerl::unordered_dense::map<uint64_t, uint64_t> glossaries;
@@ -320,7 +642,7 @@ index 75a971e..7c4eae9 100644
      if (processed.data.empty()) {
        return;
      }
-@@ -753,7 +807,7 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -753,7 +808,7 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
          bytes_ahead += task_bytes[index];
        }
        try {
@@ -329,7 +651,7 @@ index 75a971e..7c4eae9 100644
          {
            std::lock_guard lock(mutex);
            processed[index].emplace(std::move(value));
-@@ -832,7 +886,9 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -832,7 +887,9 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
  #else
    for (int file_index : files) {
      threads.push_back(std::async(
@@ -340,7 +662,7 @@ index 75a971e..7c4eae9 100644
  
      if (threads.size() == max_threads) {
        write_processed(threads.front().get());
-@@ -906,7 +962,7 @@ void write_meta(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>&
+@@ -906,7 +963,7 @@ void write_meta(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>&
    for (int file_index : files) {
      threads.push_back(
          pool.submit([&source, file_index, record_type]() {
@@ -349,7 +671,7 @@ index 75a971e..7c4eae9 100644
          }));
  
      if (threads.size() == max_threads) {
-@@ -946,7 +1002,9 @@ void write_kanji(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -946,7 +1003,9 @@ void write_kanji(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
  
    for (int file_index : files) {
      threads.push_back(
@@ -360,7 +682,57 @@ index 75a971e..7c4eae9 100644
  
      if (threads.size() == max_threads) {
        write_processed(threads.front().get());
-@@ -1118,7 +1176,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
+@@ -999,9 +1058,17 @@ std::vector<char> build_offset_index(std::vector<std::pair<uint64_t, uint64_t>>&
+   return offset_buf;
+ }
+ 
+-size_t write_media(const std::filesystem::path& path, const DictionarySource& source, const std::vector<int>& files) {
++struct WrittenMedia {
++  size_t count = 0;
++  // The size of each image whose header gives it.
++  ankerl::unordered_dense::map<std::string, ImageSize> image_sizes;
++};
++
++WrittenMedia write_media(const std::filesystem::path& path, const DictionarySource& source,
++                         const std::vector<int>& files) {
++  WrittenMedia written;
+   if (files.empty()) {
+-    return 0;
++    return written;
+   }
+ 
+   std::ofstream media(path / "media.bin", std::ios::binary);
+@@ -1009,7 +1076,6 @@ size_t write_media(const std::filesystem::path& path, const DictionarySource& so
+   setup_stream_exceptions(media);
+   setup_stream_exceptions(media_idx);
+ 
+-  size_t media_count = 0;
+   uint32_t write_pos = 0;
+   std::vector<char> buf;
+   std::vector<std::pair<std::string, uint32_t>> index_entries;
+@@ -1028,8 +1094,11 @@ size_t write_media(const std::filesystem::path& path, const DictionarySource& so
+     media.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+     write_pos += buf.size();
+ 
++    if (auto size = image_size::read({media_file->blob.data(), media_file->blob.size()})) {
++      written.image_sizes.emplace(media_file->path, *size);
++    }
+     index_entries.emplace_back(std::move(media_file->path), record_start);
+-    media_count++;
++    written.count++;
+   }
+ 
+   std::ranges::sort(index_entries);
+@@ -1040,7 +1109,7 @@ size_t write_media(const std::filesystem::path& path, const DictionarySource& so
+   }
+ 
+   media_idx.write(index_buf.data(), static_cast<std::streamsize>(index_buf.size()));
+-  return media_count;
++  return written;
+ }
+ }
+ 
+@@ -1118,7 +1187,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
      uint64_t write_offset = 0;
      LongKeyIndex long_keys;
      write_terms(blobs, offsets, source, files.term_banks, write_offset, result, low_ram, cdict.get(), pool,
@@ -369,7 +741,32 @@ index 75a971e..7c4eae9 100644
      write_scan_index(dict_path, long_keys);
      write_meta(blobs, offsets, source, files.meta_banks, 1, write_offset, result.summary.counts.termMeta, low_ram,
                 pool);
-@@ -1183,7 +1241,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
+@@ -1143,7 +1212,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
+     // Media extraction runs beside the sort; the sort keeps one thread short
+     // of the pool so that it never waits behind it.
+     const bool media_on_pool = pool.size() > 1 && !files.media_files.empty();
+-    std::future<size_t> media_thread = pool.submit(
++    std::future<WrittenMedia> media_thread = pool.submit(
+         [&dict_path, &source, &files]() { return write_media(dict_path, source, files.media_files); });
+ 
+     std::vector<std::pair<uint64_t, uint64_t>> hash_entries;
+@@ -1167,7 +1236,14 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
+     }
+     hash_thread.get();
+ 
+-    result.summary.counts.media.total = media_thread.get();
++    const WrittenMedia media = media_thread.get();
++    result.summary.counts.media.total = media.count;
++    for (auto& image : result.images) {
++      if (const auto it = media.image_sizes.find(image.path); it != media.image_sizes.end()) {
++        image.width = it->second.width;
++        image.height = it->second.height;
++      }
++    }
+     result.warnings = source.warnings();
+ 
+     std::string summary_json;
+@@ -1183,7 +1259,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
      setup_stream_exceptions(index_file);
      index_file.write(summary_json.data(), static_cast<std::streamsize>(summary_json.size()));
  

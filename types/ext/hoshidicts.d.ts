@@ -69,6 +69,9 @@ export type ImportImage = {
     path: string;
     expression: string;
     reading: string;
+    /** The size the image's header gives, or 0 when the header does not settle it. */
+    width: number;
+    height: number;
 };
 
 export type TermRedirect = {
