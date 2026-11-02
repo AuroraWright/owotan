@@ -139,7 +139,9 @@
             "inherit": "base",
             "fileName": "yomitan-chrome.zip",
             "excludeFiles": [
-                "background.html"
+                "background.html",
+                "lib/hoshidicts.js",
+                "lib/hoshidicts.wasm"
             ]
         },
         {
@@ -165,6 +167,11 @@
                     "patternFlags": "",
                     "replacement": "$1. This is a development build."
                 }
+            ],
+            "excludeFiles": [
+                "background.html",
+                "lib/hoshidicts.js",
+                "lib/hoshidicts.wasm"
             ]
         },
         {
@@ -188,6 +195,11 @@
                         "clipboardRead"
                     ]
                 }
+            ],
+            "excludeFiles": [
+                "background.html",
+                "lib/hoshidicts.js",
+                "lib/hoshidicts.wasm"
             ]
         },
         {
@@ -293,7 +305,9 @@
                 "sw.js",
                 "offscreen.html",
                 "js/background/offscreen.js",
-                "js/background/offscreen-main.js"
+                "js/background/offscreen-main.js",
+                "lib/hoshidicts-threads.js",
+                "lib/hoshidicts-threads.wasm"
             ]
         },
         {
@@ -342,7 +356,9 @@
                 "sw.js",
                 "offscreen.html",
                 "js/background/offscreen.js",
-                "js/background/offscreen-main.js"
+                "js/background/offscreen-main.js",
+                "lib/hoshidicts-threads.js",
+                "lib/hoshidicts-threads.wasm"
             ]
         },
         {
@@ -412,7 +428,9 @@
                 "sw.js",
                 "offscreen.html",
                 "js/background/offscreen.js",
-                "js/background/offscreen-main.js"
+                "js/background/offscreen-main.js",
+                "lib/hoshidicts-threads.js",
+                "lib/hoshidicts-threads.wasm"
             ]
         },
         {
@@ -420,7 +438,9 @@
             "inherit": "base",
             "fileName": "yomitan-edge.zip",
             "excludeFiles": [
-                "background.html"
+                "background.html",
+                "lib/hoshidicts.js",
+                "lib/hoshidicts.wasm"
             ]
         }
     ]
