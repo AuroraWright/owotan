@@ -117,6 +117,12 @@
                 ]
             }
         ],
+        "cross_origin_embedder_policy": {
+            "value": "credentialless"
+        },
+        "cross_origin_opener_policy": {
+            "value": "same-origin"
+        },
         "content_security_policy": {
             "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src blob: 'self'; style-src 'self' 'unsafe-inline'; media-src *; connect-src *",
             "sandbox": "sandbox allow-scripts; default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'unsafe-inline'"
@@ -189,6 +195,18 @@
             "inherit": "base",
             "fileName": "yomitan-firefox.zip",
             "modifications": [
+                {
+                    "action": "delete",
+                    "path": [
+                        "cross_origin_embedder_policy"
+                    ]
+                },
+                {
+                    "action": "delete",
+                    "path": [
+                        "cross_origin_opener_policy"
+                    ]
+                },
                 {
                     "action": "set",
                     "path": [
@@ -335,6 +353,18 @@
         {
             "name": "safari",
             "modifications": [
+                {
+                    "action": "delete",
+                    "path": [
+                        "cross_origin_embedder_policy"
+                    ]
+                },
+                {
+                    "action": "delete",
+                    "path": [
+                        "cross_origin_opener_policy"
+                    ]
+                },
                 {
                     "action": "set",
                     "path": [

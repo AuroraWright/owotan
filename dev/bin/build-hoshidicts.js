@@ -15,7 +15,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Builds the hoshidicts dictionary engine into ext/lib/hoshidicts.{js,wasm}.
+// Builds the hoshidicts dictionary engine into ext/lib/hoshidicts.{js,wasm}, and
+// with threads, for imports in cross-origin isolated pages, into
+// ext/lib/hoshidicts-threads.{js,wasm}.
 // Needs git, cmake, ninja and an activated Emscripten SDK (emcmake on PATH).
 // The pinned hoshidicts commit is checked out under node_modules/.cache, which
 // no linter or test runner looks in, and dev/hoshidicts/hoshidicts.patch, the
@@ -34,6 +36,7 @@ const projectDirectory = path.join(dirname, '..', 'hoshidicts');
 const buildDirectory = path.join(dirname, '..', '..', 'node_modules', '.cache', 'hoshidicts');
 const sourceDirectory = path.join(buildDirectory, 'hoshidicts');
 const cmakeDirectory = path.join(buildDirectory, 'cmake');
+const cmakeThreadsDirectory = path.join(buildDirectory, 'cmake-threads');
 const outputDirectory = path.join(dirname, '..', '..', 'ext', 'lib');
 
 /**
@@ -55,10 +58,18 @@ run('git', ['clean', '--quiet', '-fdx'], sourceDirectory);
 run('git', ['submodule', 'update', '--quiet', '--init', '--recursive'], sourceDirectory);
 run('git', ['apply', path.join(projectDirectory, 'hoshidicts.patch')], sourceDirectory);
 
-run('emcmake', ['cmake', '-S', projectDirectory, '-B', cmakeDirectory, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', `-DHOSHIDICTS_SOURCE_DIR=${sourceDirectory}`]);
-run('cmake', ['--build', cmakeDirectory]);
+// The single-threaded module, for lookups and for imports where threads are unavailable, and the threaded one.
+for (const [directory, threads] of /** @type {[string, boolean][]} */ ([[cmakeDirectory, false], [cmakeThreadsDirectory, true]])) {
+    run('emcmake', ['cmake', '-S', projectDirectory, '-B', directory, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', `-DHOSHIDICTS_SOURCE_DIR=${sourceDirectory}`, `-DYOMITAN_HOSHIDICTS_THREADS=${threads ? 'ON' : 'OFF'}`]);
+    run('cmake', ['--build', directory]);
+}
 
 mkdirSync(outputDirectory, {recursive: true});
-for (const fileName of ['hoshidicts.js', 'hoshidicts.wasm']) {
-    copyFileSync(path.join(cmakeDirectory, fileName), path.join(outputDirectory, fileName));
+for (const [directory, fileName] of [
+    [cmakeDirectory, 'hoshidicts.js'],
+    [cmakeDirectory, 'hoshidicts.wasm'],
+    [cmakeThreadsDirectory, 'hoshidicts-threads.js'],
+    [cmakeThreadsDirectory, 'hoshidicts-threads.wasm'],
+]) {
+    copyFileSync(path.join(directory, fileName), path.join(outputDirectory, fileName));
 }

@@ -143,7 +143,9 @@ export class DictionaryImporter {
      * @throws {Error}
      */
     async _importArchive(archiveContent) {
-        const hoshidicts = await Hoshidicts.create();
+        // Threads share memory, which only a cross-origin isolated context may. The threads' workers last as long
+        // as the worker that runs the import.
+        const hoshidicts = await Hoshidicts.create(typeof crossOriginIsolated === 'boolean' && crossOriginIsolated);
         const {fs} = hoshidicts;
         fs.writeFile('/archive.zip', new Uint8Array(archiveContent));
         fs.mkdir('/import');
