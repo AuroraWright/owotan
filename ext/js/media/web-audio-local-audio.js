@@ -17,6 +17,9 @@
 
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 
+/** How long to wait for a suspended audio context to start, in milliseconds. */
+const RESUME_TIMEOUT = 1000;
+
 export class WebAudioLocalAudio {
     /**
      * @param {string} base64Data
@@ -79,11 +82,11 @@ export class WebAudioLocalAudio {
         if (!this._decodedBuffer || !this._audioContext) { return; }
         this._bufferSourceEventListeners.removeAllEventListeners();
 
-        if (this._audioContext.state === 'suspended') {
-            await this._audioContext.resume();
-        }
         if (this._audioContext.state === 'closed') {
             this._audioContext = new AudioContext();
+        }
+        if (this._audioContext.state === 'suspended') {
+            await this._resumeAudioContext();
         }
 
         this._bufferSource = this._audioContext.createBufferSource();
@@ -99,6 +102,30 @@ export class WebAudioLocalAudio {
         this._bufferSourceEventListeners.addEventListener(this._bufferSource, 'ended', () => {
             void this._audioContext.close();
         });
+    }
+
+    /**
+     * Chrome leaves `resume()` pending until the page gets a user gesture when autoplay is not allowed,
+     * so playback is given up on after a short wait and fails like an audio element's `play()` does.
+     * @throws {DOMException}
+     */
+    async _resumeAudioContext() {
+        const audioContext = this._audioContext;
+        /** @type {?import('core').Timeout} */
+        let timer = null;
+        try {
+            await Promise.race([
+                audioContext.resume(),
+                new Promise((resolve) => { timer = setTimeout(resolve, RESUME_TIMEOUT); }),
+            ]);
+        } finally {
+            if (timer !== null) { clearTimeout(timer); }
+        }
+        if (audioContext.state !== 'running') {
+            // Closed so that a later gesture does not start it; play() creates a new context.
+            void audioContext.close();
+            throw new DOMException('The audio context was not allowed to start', 'NotAllowedError');
+        }
     }
 
     /**
