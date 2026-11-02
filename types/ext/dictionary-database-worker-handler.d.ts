@@ -15,11 +15,36 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import type {DictionaryDatabaseEngine} from '../../ext/js/dictionary/dictionary-database-engine';
+import type {SerializedError} from './core';
+
 export type MessageToWorker = (
+    Invoke |
     ConnectToDatabaseWorker
 );
+
+/** The engine methods the dictionary database calls in the worker. */
+export type EngineMethodName = {
+    [K in keyof DictionaryDatabaseEngine]: K extends `_${string}` ? never : (DictionaryDatabaseEngine[K] extends (...args: never[]) => Promise<unknown> ? K : never);
+}[keyof DictionaryDatabaseEngine];
+
+export type InvokeParams = {
+    id: number;
+    name: EngineMethodName;
+    args: unknown[];
+};
+
+export type Invoke = {
+    action: 'invoke';
+    params: InvokeParams;
+};
 
 export type ConnectToDatabaseWorker = {
     action: 'connectToDatabaseWorker';
     params: null;
 };
+
+export type MessageFromWorker = (
+    {id: number, result: unknown} |
+    {id: number, error: SerializedError}
+);

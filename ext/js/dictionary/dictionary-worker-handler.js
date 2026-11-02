@@ -19,6 +19,7 @@
 import {ExtensionError} from '../core/extension-error.js';
 import {DictionaryDatabase} from './dictionary-database.js';
 import {DictionaryImporter} from './dictionary-importer.js';
+import {OpfsDictionaryStorage} from './dictionary-storage.js';
 import {DictionaryWorkerMediaLoader} from './dictionary-worker-media-loader.js';
 
 export class DictionaryWorkerHandler {
@@ -42,9 +43,6 @@ export class DictionaryWorkerHandler {
         switch (action) {
             case 'importDictionary':
                 void this._onMessageWithProgress(params, this._importDictionary.bind(this));
-                break;
-            case 'deleteDictionary':
-                void this._onMessageWithProgress(params, this._deleteDictionary.bind(this));
                 break;
             case 'getDictionaryCounts':
                 void this._onMessageWithProgress(params, this._getDictionaryCounts.bind(this));
@@ -100,20 +98,6 @@ export class DictionaryWorkerHandler {
     }
 
     /**
-     * @param {import('dictionary-worker-handler').DeleteDictionaryMessageParams} details
-     * @param {import('dictionary-database').DeleteDictionaryProgressCallback} onProgress
-     * @returns {Promise<void>}
-     */
-    async _deleteDictionary({dictionaryTitle}, onProgress) {
-        const dictionaryDatabase = await this._getPreparedDictionaryDatabase();
-        try {
-            return await dictionaryDatabase.deleteDictionary(dictionaryTitle, 1000, onProgress);
-        } finally {
-            void dictionaryDatabase.close();
-        }
-    }
-
-    /**
      * @param {import('dictionary-worker-handler').GetDictionaryCountsMessageParams} details
      * @returns {Promise<import('dictionary-database').DictionaryCounts>}
      */
@@ -130,7 +114,9 @@ export class DictionaryWorkerHandler {
      * @returns {Promise<DictionaryDatabase>}
      */
     async _getPreparedDictionaryDatabase() {
-        const dictionaryDatabase = new DictionaryDatabase();
+        // Dictionaries are imported and counted here without opening them, which the worker of the
+        // database the extension reads from does.
+        const dictionaryDatabase = new DictionaryDatabase(new OpfsDictionaryStorage());
         await dictionaryDatabase.prepare();
         return dictionaryDatabase;
     }

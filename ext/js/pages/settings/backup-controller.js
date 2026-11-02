@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {Dexie} from '../../../lib/dexie.js';
 import {ThemeController} from '../../app/theme-controller.js';
 import {parseJson} from '../../core/json.js';
 import {log} from '../../core/log.js';
@@ -54,11 +53,6 @@ export class BackupController {
         /** @type {?OptionsUtil} */
         this._optionsUtil = null;
 
-        /** @type {string} */
-        this._dictionariesDatabaseName = 'dict';
-        /** @type {?import('core').TokenObject} */
-        this._settingsExportDatabaseToken = null;
-
         try {
             this._optionsUtil = new OptionsUtil();
         } catch (e) {
@@ -86,10 +80,6 @@ export class BackupController {
         this._addNodeEventListener('#settings-import-file', 'change', this._onSettingsImportFileChange.bind(this), false);
         this._addNodeEventListener('#settings-reset-button', 'click', this._onSettingsResetClick.bind(this), false);
         this._addNodeEventListener('#settings-reset-confirm-button', 'click', this._onSettingsResetConfirmClick.bind(this), false);
-
-        this._addNodeEventListener('#settings-export-db-button', 'click', this._onSettingsExportDatabaseClick.bind(this), false);
-        this._addNodeEventListener('#settings-import-db-button', 'click', this._onSettingsImportDatabaseClick.bind(this), false);
-        this._addNodeEventListener('#settings-import-db', 'change', this._onSettingsImportDatabaseChange.bind(this), false);
     }
 
     // Private
@@ -516,179 +506,6 @@ export class BackupController {
             await this._settingsImportSetOptionsFull(optionsFull);
         } catch (e) {
             log.error(e);
-        }
-    }
-
-    // Exporting Dictionaries Database
-
-    /**
-     * @param {string} message
-     * @param {boolean} [isWarning]
-     */
-    _databaseExportImportErrorMessage(message, isWarning = false) {
-        /** @type {HTMLElement} */
-        const errorMessageSettingsContainer = querySelectorNotNull(document, '#db-ops-error-report-container');
-        errorMessageSettingsContainer.style.display = 'block';
-        /** @type {HTMLElement} */
-        const errorMessageContainer = querySelectorNotNull(document, '#db-ops-error-report');
-        errorMessageContainer.style.display = 'block';
-        errorMessageContainer.textContent = message;
-
-        if (isWarning) { // Hide after 5 seconds (5000 milliseconds)
-            errorMessageContainer.style.color = '#FFC40C';
-            setTimeout(function _hideWarningMessage() {
-                errorMessageContainer.style.display = 'none';
-                errorMessageContainer.style.color = '#8B0000';
-            }, 5000);
-        }
-    }
-
-    /**
-     * @param {{totalRows: number, completedRows: number, done: boolean}} details
-     */
-    _databaseExportProgressCallback({totalRows, completedRows, done}) {
-        log.log(`Progress: ${completedRows} of ${totalRows} rows completed`);
-        /** @type {HTMLElement} */
-        const messageSettingsContainer = querySelectorNotNull(document, '#db-ops-progress-report-container');
-        messageSettingsContainer.style.display = 'block';
-        /** @type {HTMLElement} */
-        const messageContainer = querySelectorNotNull(document, '#db-ops-progress-report');
-        messageContainer.style.display = 'block';
-        messageContainer.textContent = `Export Progress: ${completedRows} of ${totalRows} rows completed`;
-
-        if (done) {
-            log.log('Done exporting.');
-            messageContainer.style.display = 'none';
-        }
-    }
-
-    /**
-     * @param {string} databaseName
-     * @returns {Promise<Blob>}
-     */
-    async _exportDatabase(databaseName) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const DexieConstructor = /** @type {import('dexie').DexieConstructor} */ (/** @type {unknown} */ (Dexie));
-        const db = new DexieConstructor(databaseName);
-        await db.open();
-        /** @type {unknown} */
-        // @ts-expect-error - The export function is declared as an extension which has no type information.
-        const blob = await db.export({
-            progressCallback: this._databaseExportProgressCallback.bind(this),
-        });
-        db.close();
-        return /** @type {Blob} */ (blob);
-    }
-
-    /** */
-    async _onSettingsExportDatabaseClick() {
-        if (this._settingsExportDatabaseToken !== null) {
-            // An existing import or export is in progress.
-            this._databaseExportImportErrorMessage('An export or import operation is already in progress. Please wait till it is over.', true);
-            return;
-        }
-
-        /** @type {HTMLElement} */
-        const errorMessageContainer = querySelectorNotNull(document, '#db-ops-error-report');
-        errorMessageContainer.style.display = 'none';
-
-        const date = new Date(Date.now());
-        const pageExitPrevention = this._settingsController.preventPageExit();
-        try {
-            /** @type {import('core').TokenObject} */
-            const token = {};
-            this._settingsExportDatabaseToken = token;
-            const fileName = `yomitan-dictionaries-${this._getSettingsExportDateString(date, '-', '-', '-', 6)}.json`;
-            const data = await this._exportDatabase(this._dictionariesDatabaseName);
-            const blob = new Blob([data], {type: 'application/json'});
-            this._saveBlob(blob, fileName);
-        } catch (error) {
-            log.log(error);
-            this._databaseExportImportErrorMessage('Errors encountered while exporting. Please try again. Restart the browser if it continues to fail.');
-        } finally {
-            pageExitPrevention.end();
-            this._settingsExportDatabaseToken = null;
-        }
-    }
-
-    // Importing Dictionaries Database
-
-    /**
-     * @param {{totalRows: number, completedRows: number, done: boolean}} details
-     */
-    _databaseImportProgressCallback({totalRows, completedRows, done}) {
-        log.log(`Progress: ${completedRows} of ${totalRows} rows completed`);
-        /** @type {HTMLElement} */
-        const messageSettingsContainer = querySelectorNotNull(document, '#db-ops-progress-report-container');
-        messageSettingsContainer.style.display = 'block';
-        /** @type {HTMLElement} */
-        const messageContainer = querySelectorNotNull(document, '#db-ops-progress-report');
-        messageContainer.style.display = 'block';
-        messageContainer.style.color = '#4169e1';
-        messageContainer.textContent = `Import Progress: ${completedRows} of ${totalRows} rows completed`;
-
-        if (done) {
-            log.log('Done importing.');
-            messageContainer.style.color = '#006633';
-            messageContainer.textContent = 'Done importing. You will need to re-enable the dictionaries and refresh afterward. If you run into issues, please restart the browser. If it continues to fail, reinstall Yomitan and import dictionaries one-by-one.';
-        }
-    }
-
-    /**
-     * @param {string} _databaseName
-     * @param {File} file
-     */
-    async _importDatabase(_databaseName, file) {
-        await this._settingsController.application.api.purgeDatabase();
-        await Dexie.import(file, {
-            progressCallback: this._databaseImportProgressCallback.bind(this),
-        });
-        void this._settingsController.application.api.triggerDatabaseUpdated('dictionary', 'import');
-        this._settingsController.application.triggerStorageChanged();
-    }
-
-    /** */
-    _onSettingsImportDatabaseClick() {
-        /** @type {HTMLElement} */
-        const element = querySelectorNotNull(document, '#settings-import-db');
-        element.click();
-    }
-
-    /**
-     * @param {Event} e
-     */
-    async _onSettingsImportDatabaseChange(e) {
-        if (this._settingsExportDatabaseToken !== null) {
-            // An existing import or export is in progress.
-            this._databaseExportImportErrorMessage('An export or import operation is already in progress. Please wait till it is over.', true);
-            return;
-        }
-
-        /** @type {HTMLElement} */
-        const errorMessageContainer = querySelectorNotNull(document, '#db-ops-error-report');
-        errorMessageContainer.style.display = 'none';
-
-        const element = /** @type {HTMLInputElement} */ (e.currentTarget);
-        const files = element.files;
-        if (files === null || files.length === 0) { return; }
-
-        const pageExitPrevention = this._settingsController.preventPageExit();
-        const file = files[0];
-        element.value = '';
-        try {
-            /** @type {import('core').TokenObject} */
-            const token = {};
-            this._settingsExportDatabaseToken = token;
-            await this._importDatabase(this._dictionariesDatabaseName, file);
-        } catch (error) {
-            log.log(error);
-            /** @type {HTMLElement} */
-            const messageContainer = querySelectorNotNull(document, '#db-ops-progress-report');
-            messageContainer.style.color = 'red';
-            this._databaseExportImportErrorMessage('Encountered errors when importing. Please restart the browser and try again. If it continues to fail, reinstall Yomitan and import dictionaries one-by-one.');
-        } finally {
-            pageExitPrevention.end();
-            this._settingsExportDatabaseToken = null;
         }
     }
 }

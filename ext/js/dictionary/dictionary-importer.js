@@ -26,10 +26,9 @@ import {
 } from '../../lib/zip.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {parseJson} from '../core/json.js';
-import {toError} from '../core/to-error.js';
-import {stringReverse} from '../core/utilities.js';
-import {getFileExtensionFromImageMediaType, getImageMediaTypeFromFileName} from '../media/media-util.js';
+import {getImageMediaTypeFromFileName} from '../media/media-util.js';
 import {compareRevisions} from './dictionary-data-util.js';
+import {Hoshidicts} from './hoshidicts.js';
 
 const ajvSchemas = /** @type {import('dictionary-importer').CompiledSchemaValidators} */ (/** @type {unknown} */ (ajvSchemas0));
 const BlobWriter = /** @type {typeof import('@zip.js/zip.js').BlobWriter} */ (/** @type {unknown} */ (BlobWriter0));
@@ -54,6 +53,7 @@ export class DictionaryImporter {
     }
 
     /**
+     * Validates a dictionary archive, has hoshidicts import it and stores the result.
      * @param {import('./dictionary-database.js').DictionaryDatabase} dictionaryDatabase
      * @param {ArrayBuffer} archiveContent
      * @param {import('dictionary-importer').ImportDetails} details
@@ -66,37 +66,6 @@ export class DictionaryImporter {
         if (!dictionaryDatabase.isPrepared()) {
             throw new Error('Database is not ready');
         }
-
-        /** @type {Error[]} */
-        const errors = [];
-        const maxTransactionLength = 1000;
-        const bulkAddProgressAllowance = 1000;
-
-        /**
-         * @template {import('dictionary-database').ObjectStoreName} T
-         * @param {T} objectStoreName
-         * @param {import('dictionary-database').ObjectStoreData<T>[]} entries
-         */
-        const bulkAdd = async (objectStoreName, entries) => {
-            const entryCount = entries.length;
-
-            let progressIndexIncrease = bulkAddProgressAllowance / Math.ceil(entryCount / maxTransactionLength);
-            if (entryCount < maxTransactionLength) { progressIndexIncrease = bulkAddProgressAllowance; }
-            if (entryCount === 0) { this._progressData.index += progressIndexIncrease; }
-
-            for (let i = 0; i < entryCount; i += maxTransactionLength) {
-                const count = Math.min(maxTransactionLength, entryCount - i);
-
-                try {
-                    await dictionaryDatabase.bulkAdd(objectStoreName, entries, i, count);
-                } catch (e) {
-                    errors.push(toError(e));
-                }
-
-                this._progressData.index += progressIndexIncrease;
-                this._progress();
-            }
-        };
 
         this._progressReset();
 
@@ -113,6 +82,9 @@ export class DictionaryImporter {
 
         const dictionaryTitle = index.title;
         const version = /** @type {import('dictionary-data').IndexVersion} */ (index.version);
+        if (version === 1) {
+            throw new Error('Dictionaries in format version 1 are not supported');
+        }
 
         // Verify database is not already imported
         if (await dictionaryDatabase.dictionaryExists(dictionaryTitle)) {
@@ -122,11 +94,22 @@ export class DictionaryImporter {
             };
         }
 
-        // Load schemas
-        this._progressNextStep(0);
-        const dataBankSchemas = this._getDataBankSchemas(version);
+        const prefixWildcardsSupported = !!details.prefixWildcardsSupported;
+        const yomitanVersion = details.yomitanVersion;
+        /** @type {import('dictionary-importer').SummaryCounts} */
+        const counts = {
+            terms: {total: 0},
+            termMeta: {total: 0},
+            kanji: {total: 0},
+            kanjiMeta: {total: 0},
+            tagMeta: {total: 0},
+            media: {total: 0},
+        };
+        // Throws early for an index Yomitan cannot use.
+        this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles: '', yomitanVersion, importSuccess: false});
 
         // Files
+        this._progressNextStep(0);
         /** @type {import('dictionary-importer').QueryDetails} */
         const queryDetails = [
             ['termFiles', /^term_bank_(\d+)\.json$/],
@@ -137,162 +120,53 @@ export class DictionaryImporter {
         ];
         const {termFiles, termMetaFiles, kanjiFiles, kanjiMetaFiles, tagFiles} = Object.fromEntries(this._getArchiveFiles(fileMap, queryDetails));
 
-        // Load data
-        const prefixWildcardsSupported = !!details.prefixWildcardsSupported;
-
+        // Validate data, counting it and finding the images its glossaries show
         this._progressNextStep(termFiles.length + termMetaFiles.length + kanjiFiles.length + kanjiMetaFiles.length + tagFiles.length);
 
-        for (const termFile of termFiles) { await this._validateFile(termFile, dataBankSchemas[0]); }
-        for (const termMetaFile of termMetaFiles) { await this._validateFile(termMetaFile, dataBankSchemas[1]); }
-        for (const kanjiFile of kanjiFiles) { await this._validateFile(kanjiFile, dataBankSchemas[2]); }
-        for (const kanjiMetaFile of kanjiMetaFiles) { await this._validateFile(kanjiMetaFile, dataBankSchemas[3]); }
-        for (const tagFile of tagFiles) { await this._validateFile(tagFile, dataBankSchemas[4]); }
-
-        // termFiles is doubled due to media importing
-        this._progressNextStep((termFiles.length * 2 + termMetaFiles.length + kanjiFiles.length + kanjiMetaFiles.length + tagFiles.length) * bulkAddProgressAllowance);
-
-        let importSuccess = false;
-
-        /** @type {import('dictionary-importer').SummaryCounts} */
-        const counts = {
-            terms: {total: 0},
-            termMeta: {total: 0},
-            kanji: {total: 0},
-            kanjiMeta: {total: 0},
-            tagMeta: {total: 0},
-            media: {total: 0},
-        };
-
-        const yomitanVersion = details.yomitanVersion;
-        /** @type {import('dictionary-importer').SummaryDetails} */
-        let summaryDetails = {prefixWildcardsSupported, counts, styles: '', yomitanVersion, importSuccess};
-
-        let summary = this._createSummary(dictionaryTitle, version, index, summaryDetails);
-        const dictionarySummaryAdd = await dictionaryDatabase.addWithResult('dictionaries', summary);
-        /** @type {Promise<IDBValidKey>} */
-        const dictionarySummaryResult = new Promise((resolve, reject) => {
-            dictionarySummaryAdd.onerror = () => reject(void 0);
-            dictionarySummaryAdd.onsuccess = () => resolve(dictionarySummaryAdd.result);
-        });
-
-        try {
-            const uniqueMediaPaths = new Set();
-            for (const termFile of termFiles) {
-            /** @type {import('dictionary-importer').ImportRequirement[]} */
-                const requirements = [];
-                let termList = await (
-                version === 1 ?
-                this._readFileSequence([termFile], this._convertTermBankEntryV1.bind(this), dictionaryTitle) :
-                this._readFileSequence([termFile], this._convertTermBankEntryV3.bind(this), dictionaryTitle)
-                );
-
-                // Prefix wildcard support
-                if (prefixWildcardsSupported) {
-                    for (const entry of termList) {
-                        entry.expressionReverse = stringReverse(entry.expression);
-                        entry.readingReverse = stringReverse(entry.reading);
-                    }
+        /** @type {Map<string, import('dictionary-data').TermV3>} The first term row that shows each image. */
+        const imageRows = new Map();
+        for (const termFile of termFiles) {
+            const entries = /** @type {import('dictionary-data').TermV3[]} */ (await this._readFile(termFile, 'dictionaryTermBankV3'));
+            counts.terms.total += entries.length;
+            for (const entry of entries) {
+                for (const path of getGlossaryImagePaths(entry[5])) {
+                    if (!imageRows.has(path)) { imageRows.set(path, entry); }
                 }
-
-                // Extended data support
-                for (let i = 0, ii = termList.length; i < ii; ++i) {
-                    const entry = termList[i];
-                    const glossaryList = entry.glossary;
-                    for (let j = 0, jj = glossaryList.length; j < jj; ++j) {
-                        const glossary = glossaryList[j];
-                        if (typeof glossary !== 'object' || glossary === null || Array.isArray(glossary)) { continue; }
-                        glossaryList[j] = this._formatDictionaryTermGlossaryObject(glossary, entry, requirements);
-                    }
-                }
-
-                const alreadyAddedRequirements = requirements.filter((x) => { return uniqueMediaPaths.has(x.source.path); });
-                const notAddedRequirements = requirements.filter((x) => { return !uniqueMediaPaths.has(x.source.path); });
-                for (const requirement of requirements) { uniqueMediaPaths.add(requirement.source.path); }
-
-                await this._resolveAsyncRequirements(alreadyAddedRequirements, fileMap); // already added must also be resolved for the term dict to have correct data
-                let {media} = await this._resolveAsyncRequirements(notAddedRequirements, fileMap);
-                await bulkAdd('media', media);
-                counts.media.total += media.length;
-
-                this._progress();
-
-                await bulkAdd('terms', termList);
-                counts.terms.total += termList.length;
-
-                this._progress();
-
-                termList = [];
-                media = [];
             }
-
-            for (const termMetaFile of termMetaFiles) {
-                let termMetaList = await this._readFileSequence([termMetaFile], this._convertTermMetaBankEntry.bind(this), dictionaryTitle);
-
-                await bulkAdd('termMeta', termMetaList);
-                for (const [key, value] of Object.entries(this._getMetaCounts(termMetaList))) {
-                    if (key in counts.termMeta) {
-                        counts.termMeta[key] += value;
-                    } else {
-                        counts.termMeta[key] = value;
-                    }
-                }
-
-                this._progress();
-
-                termMetaList = [];
-            }
-
-            for (const kanjiFile of kanjiFiles) {
-                let kanjiList = await (
-                version === 1 ?
-                this._readFileSequence([kanjiFile], this._convertKanjiBankEntryV1.bind(this), dictionaryTitle) :
-                this._readFileSequence([kanjiFile], this._convertKanjiBankEntryV3.bind(this), dictionaryTitle)
-                );
-
-                await bulkAdd('kanji', kanjiList);
-                counts.kanji.total += kanjiList.length;
-
-                this._progress();
-
-                kanjiList = [];
-            }
-
-            for (const kanjiMetaFile of kanjiMetaFiles) {
-                let kanjiMetaList = await this._readFileSequence([kanjiMetaFile], this._convertKanjiMetaBankEntry.bind(this), dictionaryTitle);
-
-                await bulkAdd('kanjiMeta', kanjiMetaList);
-                for (const [key, value] of Object.entries(this._getMetaCounts(kanjiMetaList))) {
-                    if (key in counts.kanjiMeta) {
-                        counts.kanjiMeta[key] += value;
-                    } else {
-                        counts.kanjiMeta[key] = value;
-                    }
-                }
-
-                this._progress();
-
-                kanjiMetaList = [];
-            }
-
-            for (const tagFile of tagFiles) {
-                let tagList = await this._readFileSequence([tagFile], this._convertTagBankEntry.bind(this), dictionaryTitle);
-                this._addOldIndexTags(index, tagList, dictionaryTitle);
-
-                await bulkAdd('tagMeta', tagList);
-                counts.tagMeta.total += tagList.length;
-
-                this._progress();
-
-                tagList = [];
-            }
-
-            importSuccess = true;
-        } catch (e) {
-            errors.push(toError(e));
+        }
+        for (const termMetaFile of termMetaFiles) {
+            const entries = /** @type {import('dictionary-data').TermMeta[]} */ (await this._readFile(termMetaFile, 'dictionaryTermMetaBankV3'));
+            addMetaCounts(counts.termMeta, this._getMetaCounts(entries.map(([, mode]) => mode)));
+        }
+        for (const kanjiFile of kanjiFiles) {
+            const entries = /** @type {unknown[]} */ (await this._readFile(kanjiFile, 'dictionaryKanjiBankV3'));
+            counts.kanji.total += entries.length;
+        }
+        for (const kanjiMetaFile of kanjiMetaFiles) {
+            const entries = /** @type {import('dictionary-data').KanjiMeta[]} */ (await this._readFile(kanjiMetaFile, 'dictionaryKanjiMetaBankV3'));
+            addMetaCounts(counts.kanjiMeta, this._getMetaCounts(entries.map(([, mode]) => mode)));
+        }
+        /** @type {import('dictionary-database').TagRecord[]} */
+        const tags = [];
+        for (const tagFile of tagFiles) {
+            const tagList = /** @type {import('dictionary-data').Tag[]} */ (await this._readFile(tagFile, 'dictionaryTagBankV3'));
+            this._addOldIndexTags(index, tagList);
+            tags.push(...tagList);
+            counts.tagMeta.total += tagList.length;
         }
 
-        // Update dictionary descriptor
-        this._progressNextStep(0);
+        // Read the images' sizes, then have hoshidicts import the dictionary
+        this._progressNextStep(imageRows.size + 2);
+
+        /** @type {{[path: string]: [width: number, height: number]}} */
+        const media = {};
+        for (const [path, entry] of imageRows) {
+            const {width, height} = await this._getImageDetails(fileMap, path, entry, dictionaryTitle);
+            media[path] = [width, height];
+            ++this._progressData.index;
+            this._progress();
+        }
+        counts.media.total = imageRows.size;
 
         const stylesFileName = 'styles.css';
         const stylesFile = fileMap.get(stylesFileName);
@@ -308,14 +182,43 @@ export class DictionaryImporter {
             }
         }
 
-        summaryDetails = {prefixWildcardsSupported, counts, styles, yomitanVersion, importSuccess};
-        summary = this._createSummary(dictionaryTitle, version, index, summaryDetails);
-        const primaryKey = await dictionarySummaryResult;
-        await dictionaryDatabase.bulkUpdate('dictionaries', [{data: summary, primaryKey}], 0, 1);
-
+        const files = await this._importArchive(archiveContent);
+        ++this._progressData.index;
         this._progress();
 
-        return {result: summary, errors};
+        const summary = this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles, yomitanVersion, importSuccess: true});
+        await dictionaryDatabase.addDictionary(files, {summary, media, tags});
+        ++this._progressData.index;
+        this._progress();
+
+        this._progressNextStep(0);
+
+        return {result: summary, errors: []};
+    }
+
+    /**
+     * Imports the archive into a hoshidicts dictionary in memory.
+     * @param {ArrayBuffer} archiveContent
+     * @returns {Promise<import('dictionary-database').DictionaryFile[]>}
+     * @throws {Error}
+     */
+    async _importArchive(archiveContent) {
+        const hoshidicts = await Hoshidicts.create();
+        const {fs} = hoshidicts;
+        fs.writeFile('/archive.zip', new Uint8Array(archiveContent));
+        fs.mkdir('/import');
+        const {success, error, directory} = hoshidicts.import('/archive.zip', '/import');
+        if (!success) {
+            throw new Error(`Could not import dictionary: ${error}`);
+        }
+        fs.unlink('/archive.zip');
+        /** @type {import('dictionary-database').DictionaryFile[]} */
+        const files = [];
+        for (const name of fs.readdir(directory)) {
+            if (name === '.' || name === '..') { continue; }
+            files.push({name, content: fs.readFile(`${directory}/${name}`)});
+        }
+        return files;
     }
 
     /**
@@ -501,28 +404,6 @@ export class DictionaryImporter {
     }
 
     /**
-     * @param {number} version
-     * @returns {import('dictionary-importer').CompiledSchemaNameArray}
-     */
-    _getDataBankSchemas(version) {
-        const termBank = (
-            version === 1 ?
-            'dictionaryTermBankV1' :
-            'dictionaryTermBankV3'
-        );
-        const termMetaBank = 'dictionaryTermMetaBankV3';
-        const kanjiBank = (
-            version === 1 ?
-            'dictionaryKanjiBankV1' :
-            'dictionaryKanjiBankV3'
-        );
-        const kanjiMetaBank = 'dictionaryKanjiMetaBankV3';
-        const tagBank = 'dictionaryTagBankV3';
-
-        return [termBank, termMetaBank, kanjiBank, kanjiMetaBank, tagBank];
-    }
-
-    /**
      * @param {string} css
      * @returns {Error[]}
      */
@@ -531,363 +412,54 @@ export class DictionaryImporter {
     }
 
     /**
-     * @param {import('dictionary-data').TermGlossaryText|import('dictionary-data').TermGlossaryImage|import('dictionary-data').TermGlossaryStructuredContent} data
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     * @param {import('dictionary-importer').ImportRequirement[]} requirements
-     * @returns {import('dictionary-data').TermGlossary}
+     * @param {import('dictionary-importer').ArchiveFileMap} fileMap
+     * @param {string} path
+     * @param {import('dictionary-data').TermV3} entry The first term row that shows the image.
+     * @param {string} dictionary
+     * @returns {Promise<{width: number, height: number}>}
      * @throws {Error}
      */
-    _formatDictionaryTermGlossaryObject(data, entry, requirements) {
-        switch (data.type) {
-            case 'text':
-                return data.text;
-            case 'image':
-                return this._formatDictionaryTermGlossaryImage(data, entry, requirements);
-            case 'structured-content':
-                return this._formatStructuredContent(data, entry, requirements);
-            default:
-                throw new Error(`Unhandled data type: ${/** @type {import('core').SerializableObject} */ (data).type}`);
-        }
-    }
-
-    /**
-     * @param {import('dictionary-data').TermGlossaryImage} data
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     * @param {import('dictionary-importer').ImportRequirement[]} requirements
-     * @returns {import('dictionary-data').TermGlossaryImage}
-     */
-    _formatDictionaryTermGlossaryImage(data, entry, requirements) {
-        /** @type {import('dictionary-data').TermGlossaryImage} */
-        const target = {
-            type: 'image',
-            path: '', // Will be populated during requirement resolution
-        };
-        requirements.push({type: 'image', target, source: data, entry});
-        return target;
-    }
-
-    /**
-     * @param {import('dictionary-data').TermGlossaryStructuredContent} data
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     * @param {import('dictionary-importer').ImportRequirement[]} requirements
-     * @returns {import('dictionary-data').TermGlossaryStructuredContent}
-     */
-    _formatStructuredContent(data, entry, requirements) {
-        const content = this._prepareStructuredContent(data.content, entry, requirements);
-        return {
-            type: 'structured-content',
-            content,
-        };
-    }
-
-    /**
-     * @param {import('structured-content').Content} content
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     * @param {import('dictionary-importer').ImportRequirement[]} requirements
-     * @returns {import('structured-content').Content}
-     */
-    _prepareStructuredContent(content, entry, requirements) {
-        if (typeof content === 'string' || !(typeof content === 'object' && content !== null)) {
-            return content;
-        }
-        if (Array.isArray(content)) {
-            for (let i = 0, ii = content.length; i < ii; ++i) {
-                content[i] = this._prepareStructuredContent(content[i], entry, requirements);
-            }
-            return content;
-        }
-        const {tag} = content;
-        switch (tag) {
-            case 'img':
-                return this._prepareStructuredContentImage(content, entry, requirements);
-        }
-        const childContent = content.content;
-        if (typeof childContent !== 'undefined') {
-            content.content = this._prepareStructuredContent(childContent, entry, requirements);
-        }
-        return content;
-    }
-
-    /**
-     * @param {import('structured-content').ImageElement} content
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     * @param {import('dictionary-importer').ImportRequirement[]} requirements
-     * @returns {import('structured-content').ImageElement}
-     */
-    _prepareStructuredContentImage(content, entry, requirements) {
-        /** @type {import('structured-content').ImageElement} */
-        const target = {
-            tag: 'img',
-            path: '', // Will be populated during requirement resolution
-        };
-        requirements.push({type: 'structured-content-image', target, source: content, entry});
-        return target;
-    }
-
-    /**
-     * @param {import('dictionary-importer').ImportRequirement[]} requirements
-     * @param {import('dictionary-importer').ArchiveFileMap} fileMap
-     * @returns {Promise<{media: import('dictionary-database').MediaDataArrayBufferContent[]}>}
-     */
-    async _resolveAsyncRequirements(requirements, fileMap) {
-        /** @type {Map<string, import('dictionary-database').MediaDataArrayBufferContent>} */
-        const media = new Map();
-        /** @type {import('dictionary-importer').ImportRequirementContext} */
-        const context = {fileMap, media};
-
-        for (const requirement of requirements) {
-            await this._resolveAsyncRequirement(context, requirement);
-        }
-
-        return {
-            media: [...media.values()],
-        };
-    }
-
-    /**
-     * @param {import('dictionary-importer').ImportRequirementContext} context
-     * @param {import('dictionary-importer').ImportRequirement} requirement
-     */
-    async _resolveAsyncRequirement(context, requirement) {
-        switch (requirement.type) {
-            case 'image':
-                await this._resolveDictionaryTermGlossaryImage(
-                    context,
-                    requirement.target,
-                    requirement.source,
-                    requirement.entry,
-                );
-                break;
-            case 'structured-content-image':
-                await this._resolveStructuredContentImage(
-                    context,
-                    requirement.target,
-                    requirement.source,
-                    requirement.entry,
-                );
-                break;
-            default:
-                return;
-        }
-    }
-
-    /**
-     * @param {import('dictionary-importer').ImportRequirementContext} context
-     * @param {import('dictionary-data').TermGlossaryImage} target
-     * @param {import('dictionary-data').TermGlossaryImage} source
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     */
-    async _resolveDictionaryTermGlossaryImage(context, target, source, entry) {
-        await this._createImageData(context, target, source, entry);
-    }
-
-    /**
-     * @param {import('dictionary-importer').ImportRequirementContext} context
-     * @param {import('structured-content').ImageElement} target
-     * @param {import('structured-content').ImageElement} source
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     */
-    async _resolveStructuredContentImage(context, target, source, entry) {
-        const {
-            verticalAlign,
-            border,
-            borderRadius,
-            sizeUnits,
-        } = source;
-        await this._createImageData(context, target, source, entry);
-        if (typeof verticalAlign === 'string') { target.verticalAlign = verticalAlign; }
-        if (typeof border === 'string') { target.border = border; }
-        if (typeof borderRadius === 'string') { target.borderRadius = borderRadius; }
-        if (typeof sizeUnits === 'string') { target.sizeUnits = sizeUnits; }
-    }
-
-    /**
-     * @param {import('dictionary-importer').ImportRequirementContext} context
-     * @param {import('structured-content').ImageElementBase} target
-     * @param {import('structured-content').ImageElementBase} source
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     */
-    async _createImageData(context, target, source, entry) {
-        const {
-            path,
-            width: preferredWidth,
-            height: preferredHeight,
-            title,
-            alt,
-            description,
-            pixelated,
-            imageRendering,
-            appearance,
-            background,
-            collapsed,
-            collapsible,
-        } = source;
-        const {width, height} = await this._getImageMedia(context, path, entry);
-        target.path = path;
-        target.width = width;
-        target.height = height;
-        if (typeof preferredWidth === 'number') { target.preferredWidth = preferredWidth; }
-        if (typeof preferredHeight === 'number') { target.preferredHeight = preferredHeight; }
-        if (typeof title === 'string') { target.title = title; }
-        if (typeof alt === 'string') { target.alt = alt; }
-        if (typeof description === 'string') { target.description = description; }
-        if (typeof pixelated === 'boolean') { target.pixelated = pixelated; }
-        if (typeof imageRendering === 'string') { target.imageRendering = imageRendering; }
-        if (typeof appearance === 'string') { target.appearance = appearance; }
-        if (typeof background === 'boolean') { target.background = background; }
-        if (typeof collapsed === 'boolean') { target.collapsed = collapsed; }
-        if (typeof collapsible === 'boolean') { target.collapsible = collapsible; }
-    }
-
-    /**
-     * @param {import('dictionary-importer').ImportRequirementContext} context
-     * @param {string} path
-     * @param {import('dictionary-database').DatabaseTermEntry} entry
-     * @returns {Promise<import('dictionary-database').MediaDataArrayBufferContent>}
-     */
-    async _getImageMedia(context, path, entry) {
-        const {media} = context;
-        const {dictionary} = entry;
-
+    async _getImageDetails(fileMap, path, entry, dictionary) {
         /**
          * @param {string} message
          * @returns {Error}
          */
         const createError = (message) => {
-            const {expression, reading} = entry;
-            const readingSource = reading.length > 0 ? ` (${reading})` : '';
-            return new Error(`${message} at path ${JSON.stringify(path)} for ${expression}${readingSource} in ${dictionary}`);
+            const [expression, reading] = entry;
+            const readingSource = reading.length > 0 ? reading : expression;
+            return new Error(`${message} at path ${JSON.stringify(path)} for ${expression}${readingSource.length > 0 ? ` (${readingSource})` : ''} in ${dictionary}`);
         };
 
-        // Check if already added
-        let mediaData = media.get(path);
-        if (typeof mediaData !== 'undefined') {
-            if (getFileExtensionFromImageMediaType(mediaData.mediaType) === null) {
-                throw createError('Media file is not a valid image');
-            }
-            return mediaData;
-        }
-
-        // Find file in archive
-        const file = context.fileMap.get(path);
+        const file = fileMap.get(path);
         if (typeof file === 'undefined') {
             throw createError('Could not find image');
         }
-
-        // Load file content
-        let content = await (await this._getData(file, new BlobWriter())).arrayBuffer();
+        const content = await (await this._getData(file, new BlobWriter())).arrayBuffer();
 
         const mediaType = getImageMediaTypeFromFileName(path);
         if (mediaType === null) {
             throw createError('Could not determine media type for image');
         }
 
-        // Load image data
-        let width;
-        let height;
         try {
-            ({content, width, height} = await this._mediaLoader.getImageDetails(content, mediaType));
+            const {width, height} = await this._mediaLoader.getImageDetails(content, mediaType);
+            return {width, height};
         } catch (e) {
             throw createError('Could not load image');
         }
-
-        // Create image data
-        mediaData = {
-            dictionary,
-            path,
-            mediaType,
-            width,
-            height,
-            content,
-        };
-        media.set(path, mediaData);
-
-        return mediaData;
     }
 
     /**
-     * @param {import('dictionary-data').TermV1} entry
-     * @param {string} dictionary
-     * @returns {import('dictionary-database').DatabaseTermEntry}
-     */
-    _convertTermBankEntryV1(entry, dictionary) {
-        let [expression, reading, definitionTags, rules, score, ...glossary] = entry;
-        reading = reading.length > 0 ? reading : expression;
-        return {expression, reading, definitionTags, rules, score, glossary, dictionary};
-    }
-
-    /**
-     * @param {import('dictionary-data').TermV3} entry
-     * @param {string} dictionary
-     * @returns {import('dictionary-database').DatabaseTermEntry}
-     */
-    _convertTermBankEntryV3(entry, dictionary) {
-        let [expression, reading, definitionTags, rules, score, glossary, sequence, termTags] = entry;
-        reading = reading.length > 0 ? reading : expression;
-        return {expression, reading, definitionTags, rules, score, glossary, sequence, termTags, dictionary};
-    }
-
-    /**
-     * @param {import('dictionary-data').TermMeta} entry
-     * @param {string} dictionary
-     * @returns {import('dictionary-database').DatabaseTermMeta}
-     */
-    _convertTermMetaBankEntry(entry, dictionary) {
-        const [expression, mode, data] = entry;
-        return /** @type {import('dictionary-database').DatabaseTermMeta} */ ({expression, mode, data, dictionary});
-    }
-
-    /**
-     * @param {import('dictionary-data').KanjiV1} entry
-     * @param {string} dictionary
-     * @returns {import('dictionary-database').DatabaseKanjiEntry}
-     */
-    _convertKanjiBankEntryV1(entry, dictionary) {
-        const [character, onyomi, kunyomi, tags, ...meanings] = entry;
-        return {character, onyomi, kunyomi, tags, meanings, dictionary};
-    }
-
-    /**
-     * @param {import('dictionary-data').KanjiV3} entry
-     * @param {string} dictionary
-     * @returns {import('dictionary-database').DatabaseKanjiEntry}
-     */
-    _convertKanjiBankEntryV3(entry, dictionary) {
-        const [character, onyomi, kunyomi, tags, meanings, stats] = entry;
-        return {character, onyomi, kunyomi, tags, meanings, stats, dictionary};
-    }
-
-    /**
-     * @param {import('dictionary-data').KanjiMeta} entry
-     * @param {string} dictionary
-     * @returns {import('dictionary-database').DatabaseKanjiMeta}
-     */
-    _convertKanjiMetaBankEntry(entry, dictionary) {
-        const [character, mode, data] = entry;
-        return {character, mode, data, dictionary};
-    }
-
-    /**
-     * @param {import('dictionary-data').Tag} entry
-     * @param {string} dictionary
-     * @returns {import('dictionary-database').Tag}
-     */
-    _convertTagBankEntry(entry, dictionary) {
-        const [name, category, order, notes, score] = entry;
-        return {name, category, order, notes, score, dictionary};
-    }
-
-    /**
+     * Appends the tags of an index's legacy `tagMeta` to a tag bank's rows.
      * @param {import('dictionary-data').Index} index
-     * @param {import('dictionary-database').Tag[]} results
-     * @param {string} dictionary
+     * @param {import('dictionary-data').Tag[]} results
      */
-    _addOldIndexTags(index, results, dictionary) {
+    _addOldIndexTags(index, results) {
         const {tagMeta} = index;
         if (typeof tagMeta !== 'object' || tagMeta === null) { return; }
         for (const [name, value] of Object.entries(tagMeta)) {
             const {category, order, notes, score} = value;
-            results.push({name, category, order, notes, score, dictionary});
+            results.push([name, category, order, notes, score]);
         }
     }
 
@@ -919,53 +491,20 @@ export class DictionaryImporter {
     }
 
     /**
-     * @template [TEntry=unknown]
-     * @template [TResult=unknown]
-     * @param {import('@zip.js/zip.js').Entry[]} files
-     * @param {(entry: TEntry, dictionaryTitle: string) => TResult} convertEntry
-     * @param {string} dictionaryTitle
-     * @returns {Promise<TResult[]>}
-     */
-    async _readFileSequence(files, convertEntry, dictionaryTitle) {
-        const results = [];
-        for (const file of files) {
-            const content = await this._getData(file, new TextWriter());
-            let entries;
-
-            try {
-                /** @type {unknown} */
-                entries = parseJson(content);
-            } catch (error) {
-                if (error instanceof Error) {
-                    throw new Error(error.message + ` in '${file.filename}'`);
-                }
-            }
-
-            if (Array.isArray(entries)) {
-                for (const entry of /** @type {TEntry[]} */ (entries)) {
-                    results.push(convertEntry(entry, dictionaryTitle));
-                }
-            }
-        }
-        return results;
-    }
-
-    /**
+     * Reads a bank file and validates it against its schema.
      * @param {import('@zip.js/zip.js').Entry} file
      * @param {import('dictionary-importer').CompiledSchemaName} schemaName
-     * @returns {Promise<boolean>}
+     * @returns {Promise<unknown[]>}
+     * @throws {Error}
      */
-    async _validateFile(file, schemaName) {
+    async _readFile(file, schemaName) {
         const content = await this._getData(file, new TextWriter());
+        /** @type {unknown} */
         let entries;
-
         try {
-            /** @type {unknown} */
             entries = parseJson(content);
         } catch (error) {
-            if (error instanceof Error) {
-                throw new Error(error.message + ` in '${file.filename}'`);
-            }
+            throw new Error((error instanceof Error ? error.message : `${error}`) + ` in '${file.filename}'`);
         }
 
         const schema = ajvSchemas[schemaName];
@@ -976,23 +515,23 @@ export class DictionaryImporter {
         ++this._progressData.index;
         this._progress();
 
-        return true;
+        return /** @type {unknown[]} */ (entries);
     }
 
     /**
-     * @param {import('dictionary-database').DatabaseTermMeta[]|import('dictionary-database').DatabaseKanjiMeta[]} metaList
+     * @param {string[]} modes The mode of each row.
      * @returns {import('dictionary-importer').SummaryMetaCount}
      */
-    _getMetaCounts(metaList) {
+    _getMetaCounts(modes) {
         /** @type {Map<string, number>} */
         const countsMap = new Map();
-        for (const {mode} of metaList) {
+        for (const mode of modes) {
             let count = countsMap.get(mode);
             count = typeof count !== 'undefined' ? count + 1 : 1;
             countsMap.set(mode, count);
         }
         /** @type {import('dictionary-importer').SummaryMetaCount} */
-        const counts = {total: metaList.length};
+        const counts = {total: modes.length};
         for (const [key, value] of countsMap.entries()) {
             if (Object.prototype.hasOwnProperty.call(counts, key)) { continue; }
             counts[key] = value;
@@ -1011,5 +550,56 @@ export class DictionaryImporter {
             throw new Error(`Cannot read ${entry.filename}`);
         }
         return await entry.getData(writer);
+    }
+}
+
+/**
+ * @param {import('dictionary-importer').SummaryMetaCount} counts
+ * @param {import('dictionary-importer').SummaryMetaCount} add
+ */
+function addMetaCounts(counts, add) {
+    for (const [key, value] of Object.entries(add)) {
+        counts[key] = (counts[key] ?? 0) + value;
+    }
+}
+
+/**
+ * Finds the paths of the images a term bank row's glossary shows.
+ * @param {import('dictionary-data').TermGlossary[]} glossary
+ * @returns {string[]}
+ */
+function getGlossaryImagePaths(glossary) {
+    /** @type {string[]} */
+    const paths = [];
+    for (const item of glossary) {
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) { continue; }
+        switch (item.type) {
+            case 'image':
+                paths.push(item.path);
+                break;
+            case 'structured-content':
+                addStructuredContentImagePaths(item.content, paths);
+                break;
+        }
+    }
+    return paths;
+}
+
+/**
+ * @param {import('structured-content').Content} content
+ * @param {string[]} paths
+ */
+function addStructuredContentImagePaths(content, paths) {
+    if (typeof content !== 'object' || content === null) { return; }
+    if (Array.isArray(content)) {
+        for (const child of content) { addStructuredContentImagePaths(child, paths); }
+        return;
+    }
+    if (content.tag === 'img') {
+        paths.push(content.path);
+        return;
+    }
+    if (typeof content.content !== 'undefined') {
+        addStructuredContentImagePaths(content.content, paths);
     }
 }

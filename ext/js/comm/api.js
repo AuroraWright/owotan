@@ -257,6 +257,14 @@ export class API {
     }
 
     /**
+     * @param {import('api').ApiParam<'deleteDictionary', 'dictionaryTitle'>} dictionaryTitle
+     * @returns {Promise<import('api').ApiReturn<'deleteDictionary'>>}
+     */
+    deleteDictionary(dictionaryTitle) {
+        return this._invoke('deleteDictionary', {dictionaryTitle});
+    }
+
+    /**
      * @param {import('api').ApiParam<'getMedia', 'targets'>} targets
      * @returns {Promise<import('api').ApiReturn<'getMedia'>>}
      */

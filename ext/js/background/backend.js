@@ -171,6 +171,7 @@ export class Backend {
             ['getDefaultAnkiFieldTemplates', this._onApiGetDefaultAnkiFieldTemplates.bind(this)],
             ['getDictionaryInfo',            this._onApiGetDictionaryInfo.bind(this)],
             ['purgeDatabase',                this._onApiPurgeDatabase.bind(this)],
+            ['deleteDictionary',             this._onApiDeleteDictionary.bind(this)],
             ['getMedia',                     this._onApiGetMedia.bind(this)],
             ['logGenericErrorBackend',       this._onApiLogGenericErrorBackend.bind(this)],
             ['logIndicatorClear',            this._onApiLogIndicatorClear.bind(this)],
@@ -932,7 +933,15 @@ export class Backend {
     /** @type {import('api').ApiHandler<'purgeDatabase'>} */
     async _onApiPurgeDatabase() {
         await this._dictionaryDatabase.purge();
-        this._triggerDatabaseUpdated('dictionary', 'purge');
+        await this._triggerDatabaseUpdated('dictionary', 'purge');
+    }
+
+    /**
+     * Dictionaries are deleted by the database that reads them, which holds their files open.
+     * @type {import('api').ApiHandler<'deleteDictionary'>}
+     */
+    async _onApiDeleteDictionary({dictionaryTitle}) {
+        await this._dictionaryDatabase.deleteDictionary(dictionaryTitle);
     }
 
     /** @type {import('api').ApiHandler<'getMedia'>} */
@@ -1002,8 +1011,8 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'triggerDatabaseUpdated'>} */
-    _onApiTriggerDatabaseUpdated({type, cause}) {
-        this._triggerDatabaseUpdated(type, cause);
+    async _onApiTriggerDatabaseUpdated({type, cause}) {
+        await this._triggerDatabaseUpdated(type, cause);
     }
 
     /** @type {import('api').ApiHandler<'testMecab'>} */
@@ -2731,10 +2740,21 @@ export class Backend {
     /**
      * @param {import('backend').DatabaseUpdateType} type
      * @param {import('backend').DatabaseUpdateCause} cause
+     * @returns {Promise<void>}
      */
-    _triggerDatabaseUpdated(type, cause) {
+    async _triggerDatabaseUpdated(type, cause) {
+        // Dictionaries are imported in other contexts, so the database reads its storage again. The
+        // reload is queued before the notification is sent, so requests made by anything that hears
+        // of the change are answered after it. Waiting for it before notifying would leave settings
+        // pages a longer window to act on dictionary lists that are out of date.
+        const reloadPromise = type === 'dictionary' ? this._dictionaryDatabase.reload() : Promise.resolve();
         void this._translator.clearDatabaseCaches();
         this._sendMessageAllTabsIgnoreResponse({action: 'applicationDatabaseUpdated', params: {type, cause}});
+        try {
+            await reloadPromise;
+        } catch (e) {
+            log.error(e);
+        }
     }
 
     /**

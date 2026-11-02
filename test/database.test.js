@@ -16,22 +16,21 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {IDBFactory, IDBKeyRange} from 'fake-indexeddb';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {join, dirname as pathDirname} from 'path';
-import {beforeEach, describe, test, vi} from 'vitest';
+import {describe, test} from 'vitest';
 import {createDictionaryArchiveData, getDictionaryArchiveIndex} from '../dev/dictionary-archive-util.js';
 import {parseJson} from '../dev/json.js';
 import {DictionaryDatabase} from '../ext/js/dictionary/dictionary-database.js';
 import {DictionaryImporter} from '../ext/js/dictionary/dictionary-importer.js';
+import {MemoryDictionaryStorage} from '../ext/js/dictionary/dictionary-storage.js';
 import {DictionaryImporterMediaLoader} from './mocks/dictionary-importer-media-loader.js';
 import {setupStubs} from './utilities/database.js';
 
 const dirname = pathDirname(fileURLToPath(import.meta.url));
 
 setupStubs();
-vi.stubGlobal('IDBKeyRange', IDBKeyRange);
 
 /**
  * @param {string} dictionary
@@ -106,9 +105,6 @@ function countKanjiWithCharacter(kanji, character) {
 
 /** */
 describe('Database', () => {
-    beforeEach(async () => {
-        globalThis.indexedDB = new IDBFactory();
-    });
     test('Database invalid usage', async ({expect}) => {
         // Load dictionary data
         const testDictionarySource = await createTestDictionaryArchiveData('valid-dictionary1');
@@ -120,12 +116,12 @@ describe('Database', () => {
         ]);
 
         // Setup database
-        const dictionaryDatabase = new DictionaryDatabase();
+        const dictionaryDatabase = new DictionaryDatabase(new MemoryDictionaryStorage());
         /** @type {import('dictionary-importer').ImportDetails} */
         const defaultImportDetails = {prefixWildcardsSupported: false, yomitanVersion: '0.0.0.0'};
 
         // Database not open
-        await expect.soft(dictionaryDatabase.deleteDictionary(title, 1000, () => {})).rejects.toThrow('Database not open');
+        await expect.soft(dictionaryDatabase.deleteDictionary(title)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermsBulk(['?'], titles, 'exact')).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermsExactBulk([{term: '?', reading: '?'}], titles)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermsBySequenceBulk([{query: 1, dictionary: title}])).rejects.toThrow('Database not open');
@@ -162,7 +158,7 @@ describe('Database', () => {
         ];
         describe.each(invalidDictionaries)('Invalid dictionary: $name', ({name}) => {
             test('Has invalid data', async ({expect}) => {
-                const dictionaryDatabase = new DictionaryDatabase();
+                const dictionaryDatabase = new DictionaryDatabase(new MemoryDictionaryStorage());
                 await dictionaryDatabase.prepare();
 
                 const testDictionarySource = await createTestDictionaryArchiveData(name);
@@ -191,7 +187,7 @@ describe('Database', () => {
             ]);
 
             // Setup database
-            const dictionaryDatabase = new DictionaryDatabase();
+            const dictionaryDatabase = new DictionaryDatabase(new MemoryDictionaryStorage());
             await dictionaryDatabase.prepare();
 
             // Import data
@@ -223,6 +219,8 @@ describe('Database', () => {
             // Test findTermsBulk
             for (const {inputs, expectedResults} of testData.tests.findTermsBulk) {
                 for (const {termList, matchType} of inputs) {
+                    // A hash index finds exact matches only; wildcard searches are not supported.
+                    if (matchType !== 'exact') { continue; }
                     const results = await dictionaryDatabase.findTermsBulk(termList, titles, matchType);
                     expect.soft(results.length).toStrictEqual(expectedResults.total);
                     for (const [term, count] of expectedResults.terms) {
@@ -310,7 +308,15 @@ describe('Database', () => {
                 ...termEntries.map(({id}) => ({id, dictionary: title})),
                 {id: termEntries[0].id, dictionary: 'Other Dictionary'},
             ]);
-            expect.soft(glossaries).toStrictEqual([...termEntries.map(({definitions}) => definitions), []]);
+            // Term rows hold only their deinflection definitions; the glossaries hold every definition.
+            expect.soft(glossaries.length).toStrictEqual(termEntries.length + 1);
+            for (let i = 0; i < termEntries.length; ++i) {
+                const {definitions, deferredDefinitionCount} = termEntries[i];
+                expect.soft(glossaries[i].filter((glossary) => Array.isArray(glossary))).toStrictEqual(definitions);
+                expect.soft(glossaries[i].filter((glossary) => !Array.isArray(glossary)).length).toStrictEqual(deferredDefinitionCount);
+            }
+            expect.soft(glossaries[0]).toContain('da definition 1');
+            expect.soft(glossaries[termEntries.length]).toStrictEqual([]);
 
             // Close
             await dictionaryDatabase.close();
@@ -329,7 +335,7 @@ describe('Database', () => {
                 const testDictionaryIndex = await getDictionaryArchiveIndex(testDictionarySource);
 
                 // Setup database
-                const dictionaryDatabase = new DictionaryDatabase();
+                const dictionaryDatabase = new DictionaryDatabase(new MemoryDictionaryStorage());
                 await dictionaryDatabase.prepare();
 
                 // Import data
@@ -342,15 +348,7 @@ describe('Database', () => {
                         await dictionaryDatabase.purge();
                         break;
                     case 'delete':
-                        {
-                            let progressEvent2 = false;
-                            await dictionaryDatabase.deleteDictionary(
-                                testDictionaryIndex.title,
-                                1000,
-                                () => { progressEvent2 = true; },
-                            );
-                            expect(progressEvent2).toBe(true);
-                        }
+                        await dictionaryDatabase.deleteDictionary(testDictionaryIndex.title);
                         break;
                 }
 

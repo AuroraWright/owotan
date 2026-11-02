@@ -298,6 +298,12 @@ type ApiSurface = {
         params: void;
         return: void;
     };
+    deleteDictionary: {
+        params: {
+            dictionaryTitle: string;
+        };
+        return: void;
+    };
     getMedia: {
         params: {
             targets: GetMediaDetailsTarget[];

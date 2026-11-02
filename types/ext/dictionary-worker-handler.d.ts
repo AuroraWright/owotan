@@ -22,7 +22,6 @@ export type OnProgressCallback = (...args: unknown[]) => void;
 
 export type Message = (
     ImportDictionaryMessage |
-    DeleteDictionaryMessage |
     GetDictionaryCountsMessage |
     GetImageDetailsResponseMessage
 );
@@ -35,15 +34,6 @@ export type ImportDictionaryMessage = {
 export type ImportDictionaryMessageParams = {
     details: DictionaryImporter.ImportDetails;
     archiveContent: ArrayBuffer;
-};
-
-export type DeleteDictionaryMessage = {
-    action: 'deleteDictionary';
-    params: DeleteDictionaryMessageParams;
-};
-
-export type DeleteDictionaryMessageParams = {
-    dictionaryTitle: string;
 };
 
 export type GetDictionaryCountsMessage = {

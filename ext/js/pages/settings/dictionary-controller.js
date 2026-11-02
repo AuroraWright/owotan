@@ -1326,28 +1326,15 @@ export class DictionaryController {
         try {
             this._setButtonsEnabled(false);
 
-            /**
-             * @param {import('dictionary-database').DeleteDictionaryProgressData} details
-             */
-            const onProgress = ({processed, count, storeCount, storesProcesed}) => {
-                const percent = (
-                    (count > 0 && storesProcesed > 0) ?
-                    (processed / count) * (storesProcesed / storeCount) * 100 :
-                    0
-                );
-                const cssString = `${percent}%`;
-                const statusString = `${percent.toFixed(0)}%`;
-                for (const progressBar of progressBars) { progressBar.style.width = cssString; }
-                for (const label of statusLabels) { label.textContent = statusString; }
-            };
-
-            onProgress({processed: 0, count: 1, storeCount: 1, storesProcesed: 0});
+            // Deleting a dictionary's files is quick, so there is no progress to show.
+            for (const progressBar of progressBars) { progressBar.style.width = '0%'; }
+            for (const label of statusLabels) { label.textContent = ''; }
 
             for (const progress of progressContainers) { progress.hidden = false; }
             for (const label of infoLabels) { label.textContent = 'Deleting dictionary...'; }
             if (statusFooter !== null) { statusFooter.setTaskActive(progressSelector, true); }
 
-            await this._deleteDictionaryInternal(dictionaryTitle, onProgress);
+            await this._deleteDictionaryInternal(dictionaryTitle);
             await this._deleteDictionarySettings(dictionaryTitle);
         } catch (e) {
             log.error(e);
@@ -1407,10 +1394,9 @@ export class DictionaryController {
 
     /**
      * @param {string} dictionaryTitle
-     * @param {import('dictionary-worker').DeleteProgressCallback} onProgress
      */
-    async _deleteDictionaryInternal(dictionaryTitle, onProgress) {
-        await new DictionaryWorker().deleteDictionary(dictionaryTitle, onProgress);
+    async _deleteDictionaryInternal(dictionaryTitle) {
+        await this._settingsController.application.api.deleteDictionary(dictionaryTitle);
         /** @type {import('core').DeferredPromiseDetails<void>} */
         const {promise: dictionariesUpdatePromise, resolve} = deferPromise();
         this._onDictionariesUpdate = resolve;

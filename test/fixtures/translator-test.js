@@ -16,35 +16,32 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {IDBKeyRange, indexedDB} from 'fake-indexeddb';
 import {expect, vi} from 'vitest';
 import {createDictionaryArchiveData} from '../../dev/dictionary-archive-util.js';
 import {DictionaryDatabase} from '../../ext/js/dictionary/dictionary-database.js';
 import {DictionaryImporter} from '../../ext/js/dictionary/dictionary-importer.js';
+import {MemoryDictionaryStorage} from '../../ext/js/dictionary/dictionary-storage.js';
 import {Translator} from '../../ext/js/language/translator.js';
 import {chrome, fetch} from '../mocks/common.js';
 import {DictionaryImporterMediaLoader} from '../mocks/dictionary-importer-media-loader.js';
 import {createDomTest} from './dom-test.js';
 
-vi.stubGlobal('indexedDB', indexedDB);
-vi.stubGlobal('IDBKeyRange', IDBKeyRange);
 vi.stubGlobal('fetch', fetch);
 vi.stubGlobal('chrome', chrome);
 
 /**
  * @param {string} dictionaryDirectory
  * @param {string} dictionaryName
- * @param {typeof DictionaryDatabase} [DatabaseClass]
  * @returns {Promise<{translator: Translator, styles: string}>}
  */
-export async function createTranslatorContext(dictionaryDirectory, dictionaryName, DatabaseClass = DictionaryDatabase) {
+export async function createTranslatorContext(dictionaryDirectory, dictionaryName) {
     // Dictionary
     const testDictionaryData = await createDictionaryArchiveData(dictionaryDirectory, dictionaryName);
 
     // Setup database
     const dictionaryImporterMediaLoader = new DictionaryImporterMediaLoader();
     const dictionaryImporter = new DictionaryImporter(dictionaryImporterMediaLoader);
-    const dictionaryDatabase = new DatabaseClass();
+    const dictionaryDatabase = new DictionaryDatabase(new MemoryDictionaryStorage());
     await dictionaryDatabase.prepare();
 
     const {errors, result} = await dictionaryImporter.importDictionary(

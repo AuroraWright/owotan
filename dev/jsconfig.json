@@ -30,9 +30,6 @@
             "css-style-applier": [
                 "../types/ext/css-style-applier"
             ],
-            "database": [
-                "../types/ext/database"
-            ],
             "dictionary": [
                 "../types/ext/dictionary"
             ],
@@ -44,6 +41,12 @@
             ],
             "dictionary-database": [
                 "../types/ext/dictionary-database"
+            ],
+            "dictionary-database-worker-handler": [
+                "../types/ext/dictionary-database-worker-handler"
+            ],
+            "hoshidicts": [
+                "../types/ext/hoshidicts"
             ],
             "dictionary-importer": [
                 "../types/ext/dictionary-importer"
@@ -133,7 +136,6 @@
         "../vitest.config.js",
         "../ext/js/core.js",
         "../ext/js/core/extension-error.js",
-        "../ext/js/data/database.js",
         "../ext/js/data/json-schema.js",
         "../ext/js/general/cache-map.js",
         "../ext/js/data/anki-note-data-creator.js",

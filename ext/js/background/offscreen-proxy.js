@@ -198,6 +198,21 @@ export class DictionaryDatabaseProxy {
     }
 
     /**
+     * @returns {Promise<void>}
+     */
+    async reload() {
+        await this._offscreen.sendMessagePromise({action: 'databaseReloadOffscreen'});
+    }
+
+    /**
+     * @param {string} dictionaryTitle
+     * @returns {Promise<void>}
+     */
+    async deleteDictionary(dictionaryTitle) {
+        await this._offscreen.sendMessagePromise({action: 'databaseDeleteDictionaryOffscreen', params: {dictionaryTitle}});
+    }
+
+    /**
      * @param {import('dictionary-database').MediaRequest[]} targets
      * @returns {Promise<import('dictionary-database').Media[]>}
      */

@@ -43,6 +43,16 @@ type ApiSurface = {
         params: void;
         return: boolean;
     };
+    databaseReloadOffscreen: {
+        params: void;
+        return: void;
+    };
+    databaseDeleteDictionaryOffscreen: {
+        params: {
+            dictionaryTitle: string;
+        };
+        return: void;
+    };
     databaseGetMediaOffscreen: {
         params: {
             targets: DictionaryDatabase.MediaRequest[];

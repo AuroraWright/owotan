@@ -18,8 +18,6 @@
 import type * as ZipJS from '@zip.js/zip.js';
 import type * as Ajv from 'ajv';
 import type * as DictionaryData from './dictionary-data';
-import type * as DictionaryDatabase from './dictionary-database';
-import type * as StructuredContent from './structured-content';
 
 export type OnProgressCallback = (data: ProgressData) => void;
 
@@ -92,30 +90,6 @@ export type SummaryMetaCount = {
     [key: string]: number;
 };
 
-export type ImportRequirement = (
-    ImageImportRequirement |
-    StructuredContentImageImportRequirement
-);
-
-export type ImageImportRequirement = {
-    type: 'image';
-    target: DictionaryData.TermGlossaryImage;
-    source: DictionaryData.TermGlossaryImage;
-    entry: DictionaryDatabase.DatabaseTermEntry;
-};
-
-export type StructuredContentImageImportRequirement = {
-    type: 'structured-content-image';
-    target: StructuredContent.ImageElement;
-    source: StructuredContent.ImageElement;
-    entry: DictionaryDatabase.DatabaseTermEntry;
-};
-
-export type ImportRequirementContext = {
-    fileMap: ArchiveFileMap;
-    media: Map<string, DictionaryDatabase.MediaDataArrayBufferContent>;
-};
-
 export type ArchiveFileMap = Map<string, ZipJS.Entry>;
 
 /**
@@ -127,14 +101,6 @@ export type QueryDetails = [fileType: string, fileNameFormat: RegExp][];
  * A map of file types inside a dictionary and its matching entries.
  */
 export type QueryResult = Map<string, ZipJS.Entry[]>;
-
-export type CompiledSchemaNameArray = [
-    termBank: CompiledSchemaName,
-    termMetaBank: CompiledSchemaName,
-    kanjiBank: CompiledSchemaName,
-    kanjiMetaBank: CompiledSchemaName,
-    tagBank: CompiledSchemaName,
-];
 
 export type CompiledSchemaValidators = {
     dictionaryIndex: Ajv.ValidateFunction<unknown>;

@@ -16,7 +16,6 @@
  */
 
 import type * as Core from './core';
-import type * as DictionaryDatabase from './dictionary-database';
 import type * as DictionaryImporter from './dictionary-importer';
 
 export type InvokeDetails<TResponseRaw = unknown, TResponse = unknown> = {
@@ -69,5 +68,3 @@ export type MessageCompleteResult = {
 };
 
 export type ImportProgressCallback = (details: DictionaryImporter.ProgressData) => void;
-
-export type DeleteProgressCallback = (details: DictionaryDatabase.DeleteDictionaryProgressData) => void;

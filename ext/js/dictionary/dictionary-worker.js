@@ -42,15 +42,6 @@ export class DictionaryWorker {
     }
 
     /**
-     * @param {string} dictionaryTitle
-     * @param {?import('dictionary-worker').DeleteProgressCallback} onProgress
-     * @returns {Promise<void>}
-     */
-    deleteDictionary(dictionaryTitle, onProgress) {
-        return this._invoke('deleteDictionary', {dictionaryTitle}, [], onProgress, null);
-    }
-
-    /**
      * @param {string[]} dictionaryNames
      * @param {boolean} getTotal
      * @returns {Promise<import('dictionary-database').DictionaryCounts>}

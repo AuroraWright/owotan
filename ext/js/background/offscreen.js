@@ -56,6 +56,8 @@ export class Offscreen {
             ['databasePrepareOffscreen',       this._prepareDatabaseHandler.bind(this)],
             ['getDictionaryInfoOffscreen',     this._getDictionaryInfoHandler.bind(this)],
             ['databasePurgeOffscreen',         this._purgeDatabaseHandler.bind(this)],
+            ['databaseReloadOffscreen',        this._reloadDatabaseHandler.bind(this)],
+            ['databaseDeleteDictionaryOffscreen', this._deleteDictionaryHandler.bind(this)],
             ['databaseGetMediaOffscreen',      this._getMediaHandler.bind(this)],
             ['translatorPrepareOffscreen',     this._prepareTranslatorHandler.bind(this)],
             ['findKanjiOffscreen',             this._findKanjiHandler.bind(this)],
@@ -120,6 +122,16 @@ export class Offscreen {
     /** @type {import('offscreen').ApiHandler<'databasePurgeOffscreen'>} */
     async _purgeDatabaseHandler() {
         return await this._dictionaryDatabase.purge();
+    }
+
+    /** @type {import('offscreen').ApiHandler<'databaseReloadOffscreen'>} */
+    async _reloadDatabaseHandler() {
+        await this._dictionaryDatabase.reload();
+    }
+
+    /** @type {import('offscreen').ApiHandler<'databaseDeleteDictionaryOffscreen'>} */
+    async _deleteDictionaryHandler({dictionaryTitle}) {
+        await this._dictionaryDatabase.deleteDictionary(dictionaryTitle);
     }
 
     /** @type {import('offscreen').ApiHandler<'databaseGetMediaOffscreen'>} */
