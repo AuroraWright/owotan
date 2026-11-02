@@ -87,6 +87,8 @@ export class ElementOverflowController {
             ...entry.querySelectorAll('.definition-item-inner'),
             ...entry.querySelectorAll('.kanji-glyph-data'),
         ];
+        /** @type {Element[]} */
+        const elementsToUpdate = [];
         for (const element of elements) {
             const {parentNode} = element;
             if (parentNode === null) { continue; }
@@ -98,7 +100,7 @@ export class ElementOverflowController {
             if (dictionaryInfo.force) {
                 element.classList.add('collapsible', 'collapsible-forced');
             } else {
-                this._updateElement(element);
+                elementsToUpdate.push(element);
                 this._elements.push(element);
             }
 
@@ -111,6 +113,7 @@ export class ElementOverflowController {
                 this._eventListeners.addEventListener(button, 'click', this._onToggleButtonClickBind, false);
             }
         }
+        this._updateElements(elementsToUpdate);
 
         if (this._elements.length > 0 && this._windowEventListeners.size === 0) {
             this._windowEventListeners.addEventListener(window, 'resize', this._onWindowResizeBind, false);
@@ -155,20 +158,25 @@ export class ElementOverflowController {
 
     /** */
     _update() {
-        for (const element of this._elements) {
-            this._updateElement(element);
-        }
+        this._updateElements(this._elements);
     }
 
     /**
-     * @param {Element} element
+     * Checks which elements are long enough to be collapsible. All of them are measured together:
+     * reading an element's size right after changing its classes makes the browser lay out the whole
+     * page again, so checking them one at a time costs a layout for each.
+     * @param {Element[]} elements
      */
-    _updateElement(element) {
-        const {classList} = element;
-        classList.add('collapse-test');
-        const collapsible = element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth;
-        classList.toggle('collapsible', collapsible);
-        classList.remove('collapse-test');
+    _updateElements(elements) {
+        for (const element of elements) {
+            element.classList.add('collapse-test');
+        }
+        const collapsible = elements.map((element) => element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth);
+        for (let i = 0, ii = elements.length; i < ii; ++i) {
+            const {classList} = elements[i];
+            classList.toggle('collapsible', collapsible[i]);
+            classList.remove('collapse-test');
+        }
     }
 
     /**
