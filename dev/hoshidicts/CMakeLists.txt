@@ -22,10 +22,11 @@ if(YOMITAN_HOSHIDICTS_THREADS)
   # The default allocator takes one lock for every allocation; with it, the
   # import threads of a dictionary of many short entries were slower than one.
   # The pool covers hoshidicts' import threads (at most 8), which start while
-  # the calling thread is blocked and so cannot wait for a worker to load.
+  # the calling thread is blocked and so cannot wait for a worker to load. Its
+  # size is a module option, so that lookups, which use no threads, start none.
   set(thread_link_options
     -sMALLOC=mimalloc
-    "-sPTHREAD_POOL_SIZE=Math.min(navigator.hardwareConcurrency || 1, 8)")
+    "-sPTHREAD_POOL_SIZE=Module['threadPoolSize'] ?? Math.min(navigator.hardwareConcurrency || 1, 8)")
 endif()
 add_compile_options(${compile_flags})
 # xxHash probes for headers wasm does not have. A function-style definition

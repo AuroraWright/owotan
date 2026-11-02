@@ -28,7 +28,7 @@ import {ExtensionError} from '../core/extension-error.js';
 import {parseJson} from '../core/json.js';
 import {getImageMediaTypeFromFileName} from '../media/media-util.js';
 import {compareRevisions} from './dictionary-data-util.js';
-import {Hoshidicts} from './hoshidicts.js';
+import {Hoshidicts, isCrossOriginIsolated} from './hoshidicts.js';
 
 const ajvSchemas = /** @type {import('dictionary-importer').CompiledSchemaValidators} */ (/** @type {unknown} */ (ajvSchemas0));
 const BlobWriter = /** @type {typeof import('@zip.js/zip.js').BlobWriter} */ (/** @type {unknown} */ (BlobWriter0));
@@ -145,7 +145,7 @@ export class DictionaryImporter {
     async _importArchive(archiveContent) {
         // Threads share memory, which only a cross-origin isolated context may. The threads' workers last as long
         // as the worker that runs the import.
-        const hoshidicts = await Hoshidicts.create(typeof crossOriginIsolated === 'boolean' && crossOriginIsolated);
+        const hoshidicts = await Hoshidicts.create(isCrossOriginIsolated() ? Math.min(navigator.hardwareConcurrency || 1, 8) : null);
         const {fs} = hoshidicts;
         fs.writeFile('/archive.zip', new Uint8Array(archiveContent));
         fs.mkdir('/import');

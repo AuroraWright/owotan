@@ -21,7 +21,7 @@ import {log} from '../core/log.js';
 import {safePerformance} from '../core/safe-performance.js';
 import {generateId} from '../core/utilities.js';
 import {getImageMediaTypeFromFileName} from '../media/media-util.js';
-import {Hoshidicts} from './hoshidicts.js';
+import {Hoshidicts, isCrossOriginIsolated} from './hoshidicts.js';
 
 /**
  * A term row's id is its dictionary's position in import order times this, plus the row's offset in
@@ -546,7 +546,7 @@ export class DictionaryDatabaseEngine {
     async _mountDictionaries() {
         if (!this._mountStale && this._hoshidicts !== null) { return; }
         if (this._hoshidicts === null) {
-            this._hoshidicts = await Hoshidicts.create();
+            this._hoshidicts = await Hoshidicts.create(isCrossOriginIsolated() ? 0 : null);
             this._hoshidicts.fs.mkdir(MOUNT_DIRECTORY);
         }
         const hoshidicts = this._hoshidicts;
