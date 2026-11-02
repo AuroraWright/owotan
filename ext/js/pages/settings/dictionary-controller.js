@@ -604,6 +604,8 @@ export class DictionaryController {
         this._dictionaryEntries = [];
         /** @type {?import('core').TokenObject} */
         this._databaseStateToken = null;
+        /** @type {?import('core').TokenObject} */
+        this._updateEntriesToken = null;
         /** @type {boolean} */
         this._checkingUpdates = false;
         /** @type {boolean} */
@@ -921,16 +923,10 @@ export class DictionaryController {
     async _updateEntries() {
         const dictionaries = this._dictionaries;
         if (dictionaries === null) { return; }
+        /** @type {?import('core').TokenObject} */
+        const token = {};
+        this._updateEntriesToken = token;
         this._updateMainDictionarySelectOptions(dictionaries);
-
-        /** @type {Map<string, string | null>} */
-        const dictionaryUpdateDownloadUrlMap = new Map();
-        for (const entry of this._dictionaryEntries) {
-            dictionaryUpdateDownloadUrlMap.set(entry.dictionaryTitle, entry.updateDownloadUrl);
-            entry.cleanup();
-        }
-        this._dictionaryEntries = [];
-        this._updateDictionaryEntryCount();
 
         if (this._dictionaryInstallCountNode !== null) {
             this._dictionaryInstallCountNode.textContent = `${dictionaries.length}`;
@@ -944,7 +940,19 @@ export class DictionaryController {
         await DictionaryController.ensureDictionarySettings(this._settingsController, dictionaries, void 0, true, false);
 
         const options = await this._settingsController.getOptions();
+        // An update that started while this one waited replaces the entries itself. The entries are
+        // replaced only after waiting, so that overlapping updates cannot each add a full list.
+        if (this._updateEntriesToken !== token) { return; }
         this._updateDictionariesEnabledWarnings(options);
+
+        /** @type {Map<string, string | null>} */
+        const dictionaryUpdateDownloadUrlMap = new Map();
+        for (const entry of this._dictionaryEntries) {
+            dictionaryUpdateDownloadUrlMap.set(entry.dictionaryTitle, entry.updateDownloadUrl);
+            entry.cleanup();
+        }
+        this._dictionaryEntries = [];
+        this._updateDictionaryEntryCount();
 
         /** @type {Map<string, import('dictionary-importer').Summary>} */
         const dictionaryInfoMap = new Map();
