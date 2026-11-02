@@ -837,11 +837,14 @@ export class DictionaryController {
      * @param {boolean} newDictionariesEnabled
      */
     static async ensureDictionarySettings(settingsController, dictionaries, optionsFull, modifyGlobalSettings, newDictionariesEnabled) {
-        if (typeof dictionaries === 'undefined') {
-            dictionaries = await settingsController.getDictionaryInfo();
-        }
+        // An import adds a dictionary to the database before adding its settings, so with the settings read first,
+        // every dictionary they have is in the list read after them. The other way around, a dictionary imported
+        // in between would lose its settings here and get them back disabled.
         if (typeof optionsFull === 'undefined') {
             optionsFull = await settingsController.getOptionsFull();
+        }
+        if (typeof dictionaries === 'undefined') {
+            dictionaries = await settingsController.getDictionaryInfo();
         }
 
         /** @type {import('settings-modifications').Modification[]} */
@@ -937,7 +940,9 @@ export class DictionaryController {
             node.hidden = hasDictionary;
         }
 
-        await DictionaryController.ensureDictionarySettings(this._settingsController, dictionaries, void 0, true, false);
+        // Not with this._dictionaries: it is only as new as the last databaseUpdated, which a settings change can
+        // arrive before.
+        await DictionaryController.ensureDictionarySettings(this._settingsController, void 0, void 0, true, false);
 
         const options = await this._settingsController.getOptions();
         // An update that started while this one waited replaces the entries itself. The entries are
