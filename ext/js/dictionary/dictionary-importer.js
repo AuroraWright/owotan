@@ -96,97 +96,41 @@ export class DictionaryImporter {
 
         const prefixWildcardsSupported = !!details.prefixWildcardsSupported;
         const yomitanVersion = details.yomitanVersion;
+        // Throws early for an index Yomitan cannot use.
+        this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts: createEmptyCounts(), styles: '', yomitanVersion, importSuccess: false});
+
+        // Have hoshidicts parse, check and import the banks
+        this._progressNextStep(0);
+        this._progressNextStep(1);
+        const {files, report} = await this._importArchive(archiveContent);
+        ++this._progressData.index;
+        this._progress();
+
+        /** @type {import('dictionary-database').TagRecord[]} */
+        const tags = [...report.tags];
+        this._addOldIndexTags(index, tags);
         /** @type {import('dictionary-importer').SummaryCounts} */
         const counts = {
-            terms: {total: 0},
-            termMeta: {total: 0},
-            kanji: {total: 0},
-            kanjiMeta: {total: 0},
-            tagMeta: {total: 0},
-            media: {total: 0},
+            ...report.counts,
+            termMeta: createMetaCounts(report.counts.termMeta),
+            kanjiMeta: createMetaCounts(report.counts.kanjiMeta),
+            tagMeta: {total: tags.length},
+            media: {total: report.images.length},
         };
-        // Throws early for an index Yomitan cannot use.
-        this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles: '', yomitanVersion, importSuccess: false});
 
-        // Files
-        this._progressNextStep(0);
-        /** @type {import('dictionary-importer').QueryDetails} */
-        const queryDetails = [
-            ['termFiles', /^term_bank_(\d+)\.json$/],
-            ['termMetaFiles', /^term_meta_bank_(\d+)\.json$/],
-            ['kanjiFiles', /^kanji_bank_(\d+)\.json$/],
-            ['kanjiMetaFiles', /^kanji_meta_bank_(\d+)\.json$/],
-            ['tagFiles', /^tag_bank_(\d+)\.json$/],
-        ];
-        const {termFiles, termMetaFiles, kanjiFiles, kanjiMetaFiles, tagFiles} = Object.fromEntries(this._getArchiveFiles(fileMap, queryDetails));
-
-        // Validate data, counting it and finding the images its glossaries show
-        this._progressNextStep(termFiles.length + termMetaFiles.length + kanjiFiles.length + kanjiMetaFiles.length + tagFiles.length);
-
-        /** @type {Map<string, import('dictionary-data').TermV3>} The first term row that shows each image. */
-        const imageRows = new Map();
-        for (const termFile of termFiles) {
-            const entries = /** @type {import('dictionary-data').TermV3[]} */ (await this._readFile(termFile, 'dictionaryTermBankV3'));
-            counts.terms.total += entries.length;
-            for (const entry of entries) {
-                for (const path of getGlossaryImagePaths(entry[5])) {
-                    if (!imageRows.has(path)) { imageRows.set(path, entry); }
-                }
-            }
-        }
-        for (const termMetaFile of termMetaFiles) {
-            const entries = /** @type {import('dictionary-data').TermMeta[]} */ (await this._readFile(termMetaFile, 'dictionaryTermMetaBankV3'));
-            addMetaCounts(counts.termMeta, this._getMetaCounts(entries.map(([, mode]) => mode)));
-        }
-        for (const kanjiFile of kanjiFiles) {
-            const entries = /** @type {unknown[]} */ (await this._readFile(kanjiFile, 'dictionaryKanjiBankV3'));
-            counts.kanji.total += entries.length;
-        }
-        for (const kanjiMetaFile of kanjiMetaFiles) {
-            const entries = /** @type {import('dictionary-data').KanjiMeta[]} */ (await this._readFile(kanjiMetaFile, 'dictionaryKanjiMetaBankV3'));
-            addMetaCounts(counts.kanjiMeta, this._getMetaCounts(entries.map(([, mode]) => mode)));
-        }
-        /** @type {import('dictionary-database').TagRecord[]} */
-        const tags = [];
-        for (const tagFile of tagFiles) {
-            const tagList = /** @type {import('dictionary-data').Tag[]} */ (await this._readFile(tagFile, 'dictionaryTagBankV3'));
-            this._addOldIndexTags(index, tagList);
-            tags.push(...tagList);
-            counts.tagMeta.total += tagList.length;
-        }
-
-        // Read the images' sizes, then have hoshidicts import the dictionary
-        this._progressNextStep(imageRows.size + 2);
+        // Read the sizes of the images the glossaries show, then store the dictionary
+        this._progressNextStep(report.images.length + 1);
 
         /** @type {{[path: string]: [width: number, height: number]}} */
         const media = {};
-        for (const [path, entry] of imageRows) {
-            const {width, height} = await this._getImageDetails(fileMap, path, entry, dictionaryTitle);
+        for (const {path, expression, reading} of report.images) {
+            const {width, height} = await this._getImageDetails(fileMap, path, expression, reading, dictionaryTitle);
             media[path] = [width, height];
             ++this._progressData.index;
             this._progress();
         }
-        counts.media.total = imageRows.size;
 
-        const stylesFileName = 'styles.css';
-        const stylesFile = fileMap.get(stylesFileName);
-        let styles = '';
-        if (typeof stylesFile !== 'undefined') {
-            styles = await this._getData(stylesFile, new TextWriter());
-            const cssErrors = this._validateCss(styles);
-            if (cssErrors.length > 0) {
-                return {
-                    errors: cssErrors,
-                    result: null,
-                };
-            }
-        }
-
-        const files = await this._importArchive(archiveContent);
-        ++this._progressData.index;
-        this._progress();
-
-        const summary = this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles, yomitanVersion, importSuccess: true});
+        const summary = this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles: report.styles, yomitanVersion, importSuccess: true});
         await dictionaryDatabase.addDictionary(files, {summary, media, tags});
         ++this._progressData.index;
         this._progress();
@@ -197,9 +141,10 @@ export class DictionaryImporter {
     }
 
     /**
-     * Imports the archive into a hoshidicts dictionary in memory.
+     * Imports the archive into a hoshidicts dictionary in memory. hoshidicts parses the banks, failing for a
+     * bank that does not hold the rows its name promises; their contents are not checked further.
      * @param {ArrayBuffer} archiveContent
-     * @returns {Promise<import('dictionary-database').DictionaryFile[]>}
+     * @returns {Promise<{files: import('dictionary-database').DictionaryFile[], report: import('hoshidicts').ImportReport}>}
      * @throws {Error}
      */
     async _importArchive(archiveContent) {
@@ -207,9 +152,10 @@ export class DictionaryImporter {
         const {fs} = hoshidicts;
         fs.writeFile('/archive.zip', new Uint8Array(archiveContent));
         fs.mkdir('/import');
-        const {success, error, directory} = hoshidicts.import('/archive.zip', '/import');
+        const report = hoshidicts.import('/archive.zip', '/import');
+        const {success, error, directory} = report;
         if (!success) {
-            throw new Error(`Could not import dictionary: ${error}`);
+            throw new Error(error.startsWith('invalid data') ? `Dictionary has ${error}` : `Could not import dictionary: ${error}`);
         }
         fs.unlink('/archive.zip');
         /** @type {import('dictionary-database').DictionaryFile[]} */
@@ -218,7 +164,7 @@ export class DictionaryImporter {
             if (name === '.' || name === '..') { continue; }
             files.push({name, content: fs.readFile(`${directory}/${name}`)});
         }
-        return files;
+        return {files, report};
     }
 
     /**
@@ -404,28 +350,20 @@ export class DictionaryImporter {
     }
 
     /**
-     * @param {string} css
-     * @returns {Error[]}
-     */
-    _validateCss(css) {
-        return css ? [] : [new Error('No styles found')];
-    }
-
-    /**
      * @param {import('dictionary-importer').ArchiveFileMap} fileMap
      * @param {string} path
-     * @param {import('dictionary-data').TermV3} entry The first term row that shows the image.
+     * @param {string} expression The expression of the first term row that shows the image.
+     * @param {string} reading The reading of that row.
      * @param {string} dictionary
      * @returns {Promise<{width: number, height: number}>}
      * @throws {Error}
      */
-    async _getImageDetails(fileMap, path, entry, dictionary) {
+    async _getImageDetails(fileMap, path, expression, reading, dictionary) {
         /**
          * @param {string} message
          * @returns {Error}
          */
         const createError = (message) => {
-            const [expression, reading] = entry;
             const readingSource = reading.length > 0 ? reading : expression;
             return new Error(`${message} at path ${JSON.stringify(path)} for ${expression}${readingSource.length > 0 ? ` (${readingSource})` : ''} in ${dictionary}`);
         };
@@ -452,7 +390,7 @@ export class DictionaryImporter {
     /**
      * Appends the tags of an index's legacy `tagMeta` to a tag bank's rows.
      * @param {import('dictionary-data').Index} index
-     * @param {import('dictionary-data').Tag[]} results
+     * @param {import('dictionary-database').TagRecord[]} results
      */
     _addOldIndexTags(index, results) {
         const {tagMeta} = index;
@@ -461,82 +399,6 @@ export class DictionaryImporter {
             const {category, order, notes, score} = value;
             results.push([name, category, order, notes, score]);
         }
-    }
-
-    /**
-     * @param {import('dictionary-importer').ArchiveFileMap} fileMap
-     * @param {import('dictionary-importer').QueryDetails} queryDetails
-     * @returns {import('dictionary-importer').QueryResult}
-     */
-    _getArchiveFiles(fileMap, queryDetails) {
-        /** @type {import('dictionary-importer').QueryResult} */
-        const results = new Map();
-
-        for (const [fileType] of queryDetails) {
-            results.set(fileType, []);
-        }
-
-        for (const [fileName, fileEntry] of fileMap.entries()) {
-            for (const [fileType, fileNameFormat] of queryDetails) {
-                if (!fileNameFormat.test(fileName)) { continue; }
-                const entries = results.get(fileType);
-
-                if (typeof entries !== 'undefined') {
-                    entries.push(fileEntry);
-                    break;
-                }
-            }
-        }
-        return results;
-    }
-
-    /**
-     * Reads a bank file and validates it against its schema.
-     * @param {import('@zip.js/zip.js').Entry} file
-     * @param {import('dictionary-importer').CompiledSchemaName} schemaName
-     * @returns {Promise<unknown[]>}
-     * @throws {Error}
-     */
-    async _readFile(file, schemaName) {
-        const content = await this._getData(file, new TextWriter());
-        /** @type {unknown} */
-        let entries;
-        try {
-            entries = parseJson(content);
-        } catch (error) {
-            throw new Error((error instanceof Error ? error.message : `${error}`) + ` in '${file.filename}'`);
-        }
-
-        const schema = ajvSchemas[schemaName];
-        if (!schema(entries)) {
-            throw this._formatAjvSchemaError(schema, file.filename);
-        }
-
-        ++this._progressData.index;
-        this._progress();
-
-        return /** @type {unknown[]} */ (entries);
-    }
-
-    /**
-     * @param {string[]} modes The mode of each row.
-     * @returns {import('dictionary-importer').SummaryMetaCount}
-     */
-    _getMetaCounts(modes) {
-        /** @type {Map<string, number>} */
-        const countsMap = new Map();
-        for (const mode of modes) {
-            let count = countsMap.get(mode);
-            count = typeof count !== 'undefined' ? count + 1 : 1;
-            countsMap.set(mode, count);
-        }
-        /** @type {import('dictionary-importer').SummaryMetaCount} */
-        const counts = {total: modes.length};
-        for (const [key, value] of countsMap.entries()) {
-            if (Object.prototype.hasOwnProperty.call(counts, key)) { continue; }
-            counts[key] = value;
-        }
-        return counts;
     }
 
     /**
@@ -554,52 +416,24 @@ export class DictionaryImporter {
 }
 
 /**
- * @param {import('dictionary-importer').SummaryMetaCount} counts
- * @param {import('dictionary-importer').SummaryMetaCount} add
+ * hoshidicts reports the modes in name order; the total comes first, as Yomitan always wrote it.
+ * @param {{[mode: string]: number}} modes
+ * @returns {import('dictionary-importer').SummaryMetaCount}
  */
-function addMetaCounts(counts, add) {
-    for (const [key, value] of Object.entries(add)) {
-        counts[key] = (counts[key] ?? 0) + value;
-    }
+function createMetaCounts({total, ...modes}) {
+    return {total, ...modes};
 }
 
 /**
- * Finds the paths of the images a term bank row's glossary shows.
- * @param {import('dictionary-data').TermGlossary[]} glossary
- * @returns {string[]}
+ * @returns {import('dictionary-importer').SummaryCounts}
  */
-function getGlossaryImagePaths(glossary) {
-    /** @type {string[]} */
-    const paths = [];
-    for (const item of glossary) {
-        if (typeof item !== 'object' || item === null || Array.isArray(item)) { continue; }
-        switch (item.type) {
-            case 'image':
-                paths.push(item.path);
-                break;
-            case 'structured-content':
-                addStructuredContentImagePaths(item.content, paths);
-                break;
-        }
-    }
-    return paths;
-}
-
-/**
- * @param {import('structured-content').Content} content
- * @param {string[]} paths
- */
-function addStructuredContentImagePaths(content, paths) {
-    if (typeof content !== 'object' || content === null) { return; }
-    if (Array.isArray(content)) {
-        for (const child of content) { addStructuredContentImagePaths(child, paths); }
-        return;
-    }
-    if (content.tag === 'img') {
-        paths.push(content.path);
-        return;
-    }
-    if (typeof content.content !== 'undefined') {
-        addStructuredContentImagePaths(content.content, paths);
-    }
+function createEmptyCounts() {
+    return {
+        terms: {total: 0},
+        termMeta: {total: 0},
+        kanji: {total: 0},
+        kanjiMeta: {total: 0},
+        tagMeta: {total: 0},
+        media: {total: 0},
+    };
 }

@@ -34,11 +34,18 @@ DictionaryQuery g_query;
 std::string g_out;
 std::vector<uint8_t> g_media;
 
+// A tag bank row: name, category, order, notes and score.
+using TagRow = std::tuple<std::string, std::string, double, std::string, double>;
+
 struct ImportReport {
   bool success = false;
   std::string title;
   std::string directory;
   std::string error;
+  SummaryCounts counts;
+  std::vector<TagRow> tags;
+  std::string styles;
+  std::vector<ImportImage> images;
 };
 
 struct Error {
@@ -94,6 +101,12 @@ EMSCRIPTEN_KEEPALIVE const char* yh_import(const char* archive_path, const char*
     report.error = result.error;
     if (result.success) {
       report.directory = (std::filesystem::path(output_directory) / dictionary_importer::folder_name(result.title)).string();
+      report.counts = std::move(result.summary.counts);
+      for (auto& tag : result.summary.tags) {
+        report.tags.emplace_back(std::move(tag.name), std::move(tag.category), tag.order, std::move(tag.notes), tag.score);
+      }
+      report.styles = std::move(result.summary.styles);
+      report.images = std::move(result.images);
     }
   } catch (const std::exception& e) {
     report.error = e.what();

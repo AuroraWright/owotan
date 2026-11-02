@@ -92,25 +92,6 @@ export type SummaryMetaCount = {
 
 export type ArchiveFileMap = Map<string, ZipJS.Entry>;
 
-/**
- * An array of tuples of a file type inside a dictionary and its corresponding regular expression.
- */
-export type QueryDetails = [fileType: string, fileNameFormat: RegExp][];
-
-/**
- * A map of file types inside a dictionary and its matching entries.
- */
-export type QueryResult = Map<string, ZipJS.Entry[]>;
-
 export type CompiledSchemaValidators = {
     dictionaryIndex: Ajv.ValidateFunction<unknown>;
-    dictionaryTermBankV1: Ajv.ValidateFunction<unknown>;
-    dictionaryTermBankV3: Ajv.ValidateFunction<unknown>;
-    dictionaryTermMetaBankV3: Ajv.ValidateFunction<unknown>;
-    dictionaryKanjiBankV1: Ajv.ValidateFunction<unknown>;
-    dictionaryKanjiBankV3: Ajv.ValidateFunction<unknown>;
-    dictionaryKanjiMetaBankV3: Ajv.ValidateFunction<unknown>;
-    dictionaryTagBankV3: Ajv.ValidateFunction<unknown>;
 };
-
-export type CompiledSchemaName = keyof CompiledSchemaValidators;

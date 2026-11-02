@@ -1,3 +1,29 @@
+diff --git a/include/hoshidicts/importer.hpp b/include/hoshidicts/importer.hpp
+index c61d2f7..0529ea4 100644
+--- a/include/hoshidicts/importer.hpp
++++ b/include/hoshidicts/importer.hpp
+@@ -71,12 +71,21 @@ struct ImportWarnings {
+   size_t unreadableResources = 0;
+ };
+ 
++// An image a glossary shows, with the first term row that shows it.
++struct ImportImage {
++  std::string path;
++  std::string expression;
++  std::string reading;
++};
++
+ struct ImportResult {
+   bool success = false;
+   std::string title;
+   Summary summary;
+   std::string error;
+   ImportWarnings warnings;
++  // Each image the term glossaries show, once, in the order the banks first show it.
++  std::vector<ImportImage> images;
+ };
+ 
+ namespace dictionary_importer {
 diff --git a/include/hoshidicts/query.hpp b/include/hoshidicts/query.hpp
 index dba519f..a7f3ed9 100644
 --- a/include/hoshidicts/query.hpp
@@ -79,27 +105,79 @@ index dba519f..a7f3ed9 100644
    std::vector<char> get_media_file(const std::string& dict_name, const std::string& media_path) const;
    // A view into the mapped media.bin; empty when the file is missing and when
 diff --git a/src/importer.cpp b/src/importer.cpp
-index 75a971e..7e2f719 100644
+index 75a971e..7c4eae9 100644
 --- a/src/importer.cpp
 +++ b/src/importer.cpp
-@@ -400,7 +400,7 @@ std::vector<char> train_zstd_dict(const DictionarySource& source, const Files& f
+@@ -158,6 +158,8 @@ struct ProcessedFile {
+   ankerl::unordered_dense::map<uint64_t, GlossarySpan> glossaries;
+   std::vector<std::pair<uint64_t, uint64_t>> glossary_offsets;
+   SummaryMetaCount meta_counts;
++  // The images the bank's glossaries show, each once.
++  std::vector<ImportImage> images;
+   size_t count = 0;
+   // (prefix hash, code point length) of every expression or reading longer
+   // than scan_index::long_key_min_codepoints; see scan_index.hpp.
+@@ -176,8 +178,18 @@ void note_long_key(std::vector<std::pair<uint64_t, uint16_t>>& long_keys, std::s
+   }
+ }
+ 
++// A bank that does not hold the rows its name promises fails the import, as
++// Yomitan's schema validation did, rather than leaving its rows out.
++[[noreturn]] void throw_invalid_data(const std::string& name) {
++  throw std::runtime_error("invalid data in '" + name + "'");
++}
++
+ void setup_stream_exceptions(std::ofstream& stream) { stream.exceptions(std::ios::failbit | std::ios::badbit); }
+ 
++const std::string& bank_name(const DictionarySource& source, int file_index) {
++  return source.entries()[static_cast<size_t>(file_index)].name;
++}
++
+ bool is_bank_or_meta(const std::string& name) {
+   return name.starts_with("term_bank_") || name.starts_with("term_meta_bank_") || name.starts_with("kanji_bank_") ||
+          name.starts_with("kanji_meta_bank_") || name.starts_with("tag_bank_") || name == "styles.css" ||
+@@ -400,15 +412,12 @@ std::vector<char> train_zstd_dict(const DictionarySource& source, const Files& f
    return dict;
  }
  
 -ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
-+ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict, bool sequenced) {
++ProcessedFile process_term_bank(std::string content, const std::string& name, const ZSTD_CDict* cdict,
++                                bool sequenced) {
    ProcessedFile processed;
-   if (content.empty()) {
-     return processed;
-@@ -423,6 +423,7 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+-  if (content.empty()) {
+-    return processed;
+-  }
+-
+   std::vector<Term> out;
+   if (!yomitan_parser::parse_term_bank(content, out)) {
+-    return processed;
++    throw_invalid_data(name);
+   }
+ 
+   ZSTD_CCtx* cctx = ZSTD_createCCtx();
+@@ -423,8 +432,21 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
    // Records hold the bank's non-glossary strings plus fixed headers.
    processed.data.reserve(content.size() / 4);
    processed.offsets.reserve(out.size() * 2);
 +  std::vector<GlossaryRedirect> redirects;
++  std::vector<std::string> image_paths;
++  ankerl::unordered_dense::set<std::string> seen_images;
    for (auto& term : out) {
      const std::string_view glossary = term.glossary.str;
++    if (!glossary.starts_with('[')) {
++      throw_invalid_data(name);
++    }
++    image_paths.clear();
++    yomitan_parser::add_glossary_image_paths(glossary, image_paths);
++    for (auto& path : image_paths) {
++      if (seen_images.insert(path).second) {
++        processed.images.push_back({std::move(path), std::string(term.expression), std::string(term.reading)});
++      }
++    }
      uint64_t glossary_hash = XXH3_64bits(glossary.data(), glossary.size());
-@@ -468,17 +469,41 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+     auto [it, inserted] = processed.glossaries.try_emplace(glossary_hash);
+     if (inserted) {
+@@ -468,17 +490,41 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
      write_str(processed.data, term.rules);
      write_val<uint8_t>(processed.data, term.term_tags.size());
      write_str(processed.data, term.term_tags);
@@ -109,7 +187,7 @@ index 75a971e..7e2f719 100644
 +    redirects.clear();
 +    size_t content_count = 0;
 +    if (!yomitan_parser::parse_glossary_redirects(glossary, redirects, content_count)) {
-+      content_count = 1;
++      throw_invalid_data(name);
 +    }
 +    write_val<uint32_t>(processed.data, redirects.size());
 +    for (const auto& redirect : redirects) {
@@ -143,7 +221,83 @@ index 75a971e..7e2f719 100644
      processed.count++;
    }
    ZSTD_freeCCtx(cctx);
-@@ -660,7 +685,7 @@ using LongKeyIndex = ankerl::unordered_dense::map<uint64_t, uint16_t>;
+@@ -488,15 +534,11 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+ 
+ // Term and kanji meta rows share one layout; `record_type` (1 for a term, 3 for
+ // a kanji) keeps a kanji's frequency from answering a term with the same text.
+-ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
++ProcessedFile process_meta_bank(std::string content, const std::string& name, uint8_t record_type) {
+   ProcessedFile processed;
+-  if (content.empty()) {
+-    return processed;
+-  }
+-
+   std::vector<Meta> out;
+   if (!yomitan_parser::parse_meta_bank(content, out)) {
+-    return processed;
++    throw_invalid_data(name);
+   }
+ 
+   // The records repeat the bank's strings with fixed headers, so the bank's
+@@ -504,6 +546,10 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
+   processed.data.reserve(content.size());
+   processed.offsets.reserve(out.size());
+   for (auto& meta : out) {
++    // glaze leaves the elements a short row lacks at their defaults.
++    if (meta.data.str.empty()) {
++      throw_invalid_data(name);
++    }
+     uint64_t offset = processed.data.size();
+     std::string_view expr = meta.expression;
+     std::string_view mode = meta.mode;
+@@ -526,20 +572,19 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
+   return processed;
+ }
+ 
+-ProcessedFile process_kanji_bank(std::string content) {
++ProcessedFile process_kanji_bank(std::string content, const std::string& name) {
+   ProcessedFile processed;
+-  if (content.empty()) {
+-    return processed;
+-  }
+-
+   std::vector<Kanji> out;
+   if (!yomitan_parser::parse_kanji_bank(content, out)) {
+-    return processed;
++    throw_invalid_data(name);
+   }
+ 
+   processed.data.reserve(content.size());
+   processed.offsets.reserve(out.size());
+   for (auto& kanji : out) {
++    if (kanji.character.empty()) {
++      throw_invalid_data(name);
++    }
+     uint64_t offset = processed.data.size();
+     std::string_view character = kanji.character;
+     std::string_view onyomi = kanji.onyomi;
+@@ -590,14 +635,17 @@ size_t count_json_array(const std::string& content) {
+ }
+ 
+ void count_unprocessed_banks(const DictionarySource& source, const Files& files, ImportResult& result) {
+-  // A tag bank that does not parse adds no tags; the import goes on, as it did
+-  // when tag banks were only counted.
+   for (int file_index : files.tag_banks) {
+     const std::string content = source.read(file_index);
+     result.summary.counts.tagMeta.total += count_json_array(content);
+     std::vector<Tag> tags;
+     if (!yomitan_parser::parse_tag_bank(content, tags)) {
+-      continue;
++      throw_invalid_data(bank_name(source, file_index));
++    }
++    for (const auto& tag : tags) {
++      if (tag.name.empty()) {
++        throw_invalid_data(bank_name(source, file_index));
++      }
+     }
+     for (auto& tag : tags) {
+       result.summary.tags.push_back(
+@@ -660,7 +708,7 @@ using LongKeyIndex = ankerl::unordered_dense::map<uint64_t, uint16_t>;
  void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>& offsets,
                   const DictionarySource& source, const std::vector<int>& files, uint64_t& write_offset,
                   ImportResult& result, bool low_ram, const ZSTD_CDict* cdict, WorkerPool& pool,
@@ -152,27 +306,61 @@ index 75a971e..7e2f719 100644
    if (files.empty()) {
      return;
    }
-@@ -753,7 +778,7 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -669,7 +717,13 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+   std::deque<std::future<ProcessedFile>> threads;
+ 
+   ankerl::unordered_dense::map<uint64_t, uint64_t> glossaries;
++  ankerl::unordered_dense::set<std::string> image_paths;
+   auto write_processed = [&](ProcessedFile&& processed) {
++    for (auto& image : processed.images) {
++      if (image_paths.insert(image.path).second) {
++        result.images.push_back(std::move(image));
++      }
++    }
+     if (processed.data.empty()) {
+       return;
+     }
+@@ -753,7 +807,7 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
          bytes_ahead += task_bytes[index];
        }
        try {
 -        auto value = process_term_bank(source.read(files[index]), cdict);
-+        auto value = process_term_bank(source.read(files[index]), cdict, sequenced);
++        auto value = process_term_bank(source.read(files[index]), bank_name(source, files[index]), cdict, sequenced);
          {
            std::lock_guard lock(mutex);
            processed[index].emplace(std::move(value));
-@@ -832,7 +857,9 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -832,7 +886,9 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
  #else
    for (int file_index : files) {
      threads.push_back(std::async(
 -        async_policy, [&source, file_index, cdict]() { return process_term_bank(source.read(file_index), cdict); }));
 +        async_policy, [&source, file_index, cdict, sequenced]() {
-+          return process_term_bank(source.read(file_index), cdict, sequenced);
++          return process_term_bank(source.read(file_index), bank_name(source, file_index), cdict, sequenced);
 +        }));
  
      if (threads.size() == max_threads) {
        write_processed(threads.front().get());
-@@ -1118,7 +1145,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
+@@ -906,7 +962,7 @@ void write_meta(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>&
+   for (int file_index : files) {
+     threads.push_back(
+         pool.submit([&source, file_index, record_type]() {
+-          return process_meta_bank(source.read(file_index), record_type);
++          return process_meta_bank(source.read(file_index), bank_name(source, file_index), record_type);
+         }));
+ 
+     if (threads.size() == max_threads) {
+@@ -946,7 +1002,9 @@ void write_kanji(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+ 
+   for (int file_index : files) {
+     threads.push_back(
+-        pool.submit([&source, file_index]() { return process_kanji_bank(source.read(file_index)); }));
++        pool.submit([&source, file_index]() {
++          return process_kanji_bank(source.read(file_index), bank_name(source, file_index));
++        }));
+ 
+     if (threads.size() == max_threads) {
+       write_processed(threads.front().get());
+@@ -1118,7 +1176,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
      uint64_t write_offset = 0;
      LongKeyIndex long_keys;
      write_terms(blobs, offsets, source, files.term_banks, write_offset, result, low_ram, cdict.get(), pool,
@@ -181,7 +369,7 @@ index 75a971e..7e2f719 100644
      write_scan_index(dict_path, long_keys);
      write_meta(blobs, offsets, source, files.meta_banks, 1, write_offset, result.summary.counts.termMeta, low_ram,
                 pool);
-@@ -1183,7 +1210,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
+@@ -1183,7 +1241,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
      setup_stream_exceptions(index_file);
      index_file.write(summary_json.data(), static_cast<std::streamsize>(summary_json.size()));
  
@@ -191,13 +379,74 @@ index 75a971e..7e2f719 100644
    } catch (const std::exception& e) {
      result.success = false;
 diff --git a/src/json/yomitan_parser.cpp b/src/json/yomitan_parser.cpp
-index 63591e8..a06f43f 100644
+index 63591e8..39b85e1 100644
 --- a/src/json/yomitan_parser.cpp
 +++ b/src/json/yomitan_parser.cpp
-@@ -414,3 +414,23 @@ bool yomitan_parser::parse_ipa(std::string_view content, ParsedPitch& out) {
+@@ -414,3 +414,84 @@ bool yomitan_parser::parse_ipa(std::string_view content, ParsedPitch& out) {
    }
    return true;
  }
++
++namespace {
++const glz::generic* find_member(const glz::generic& value, std::string_view key) {
++  return value.is_object() && value.contains(key) ? &value.at(key) : nullptr;
++}
++
++bool is_string(const glz::generic* value, std::string_view expected) {
++  return value != nullptr && value->is_string() && value->get_string() == expected;
++}
++
++void add_structured_content_image_paths(const glz::generic& content, std::vector<std::string>& paths) {
++  if (content.is_array()) {
++    for (const auto& child : content.get_array()) {
++      add_structured_content_image_paths(child, paths);
++    }
++    return;
++  }
++  if (is_string(find_member(content, "tag"), "img")) {
++    const glz::generic* path = find_member(content, "path");
++    if (path != nullptr && path->is_string()) {
++      paths.push_back(path->get_string());
++    }
++    return;
++  }
++  if (const glz::generic* child = find_member(content, "content")) {
++    add_structured_content_image_paths(*child, paths);
++  }
++}
++}  // namespace
++
++void yomitan_parser::add_glossary_image_paths(std::string_view glossary, std::vector<std::string>& paths) {
++  // Every image names a path; few glossaries do, so only those are parsed.
++  constexpr std::string_view path_key = "\"path\"";
++  if (glossary.find(path_key) == std::string_view::npos) {
++    return;
++  }
++  std::vector<hoshidicts::raw_value_view> items;
++  if (glz::read<bank_opts>(items, glossary)) {
++    return;
++  }
++  for (const auto& item : items) {
++    if (!item.str.starts_with('{') || item.str.find(path_key) == std::string_view::npos) {
++      continue;
++    }
++    glz::generic value;
++    if (glz::read_json(value, item.str)) {
++      continue;
++    }
++    const glz::generic* type = find_member(value, "type");
++    if (is_string(type, "image")) {
++      const glz::generic* path = find_member(value, "path");
++      if (path != nullptr && path->is_string()) {
++        paths.push_back(path->get_string());
++      }
++    } else if (is_string(type, "structured-content")) {
++      if (const glz::generic* content = find_member(value, "content")) {
++        add_structured_content_image_paths(*content, paths);
++      }
++    }
++  }
++}
 +
 +bool yomitan_parser::parse_glossary_redirects(std::string_view glossary, std::vector<GlossaryRedirect>& redirects,
 +                                              size_t& content_count) {
@@ -219,7 +468,7 @@ index 63591e8..a06f43f 100644
 +  return true;
 +}
 diff --git a/src/json/yomitan_parser.hpp b/src/json/yomitan_parser.hpp
-index 7e4a7b4..6a0a947 100644
+index 7e4a7b4..26e366c 100644
 --- a/src/json/yomitan_parser.hpp
 +++ b/src/json/yomitan_parser.hpp
 @@ -1,4 +1,6 @@
@@ -253,7 +502,7 @@ index 7e4a7b4..6a0a947 100644
  struct Meta {
    std::string_view expression;
    std::string_view mode;
-@@ -97,6 +116,11 @@ bool parse_meta_bank(std::string& content, std::vector<Meta>& out);
+@@ -97,6 +116,14 @@ bool parse_meta_bank(std::string& content, std::vector<Meta>& out);
  bool parse_kanji_bank(std::string& content, std::vector<Kanji>& out);
  bool parse_tag_bank(std::string_view content, std::vector<Tag>& out);
  bool parse_frequency(std::string_view content, ParsedFrequency& out);
@@ -262,6 +511,9 @@ index 7e4a7b4..6a0a947 100644
 +// redirect counts as neither, as Yomitan drops every array item from display.
 +bool parse_glossary_redirects(std::string_view glossary, std::vector<GlossaryRedirect>& redirects,
 +                              size_t& content_count);
++// Appends the path of each image a glossary shows: an image item's, or that of
++// an img element anywhere in a structured-content item.
++void add_glossary_image_paths(std::string_view glossary, std::vector<std::string>& paths);
  bool parse_pitch(std::string_view content, ParsedPitch& out);
  bool parse_ipa(std::string_view content, ParsedPitch& out);
  };

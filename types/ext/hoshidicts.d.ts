@@ -15,6 +15,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import type * as DictionaryData from './dictionary-data';
+
 /** The parts of Emscripten's file system the dictionary code uses. */
 export type FileSystem = {
     mkdir(path: string): void;
@@ -46,7 +48,27 @@ export type ImportReport = {
     title: string;
     /** The directory the dictionary was written to. */
     directory: string;
+    /** Begins with `invalid data` when a bank does not hold the rows its name promises. */
     error: string;
+    counts: {
+        terms: {total: number};
+        termMeta: {[mode: string]: number};
+        kanji: {total: number};
+        kanjiMeta: {[mode: string]: number};
+        tagMeta: {total: number};
+        media: {total: number};
+    };
+    /** The tag banks' rows. */
+    tags: DictionaryData.Tag[];
+    styles: string;
+    /** Each image the term glossaries show, once, with the first term row that shows it. */
+    images: ImportImage[];
+};
+
+export type ImportImage = {
+    path: string;
+    expression: string;
+    reading: string;
 };
 
 export type TermRedirect = {
