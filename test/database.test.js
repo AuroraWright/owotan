@@ -129,6 +129,7 @@ describe('Database', () => {
         await expect.soft(dictionaryDatabase.findTermsBulk(['?'], titles, 'exact')).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermsExactBulk([{term: '?', reading: '?'}], titles)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermsBySequenceBulk([{query: 1, dictionary: title}])).rejects.toThrow('Database not open');
+        await expect.soft(dictionaryDatabase.findTermGlossariesBulk([{id: 1, dictionary: title}])).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermMetaBulk(['?'], titles)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermMetaBulk(['?'], titles)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findKanjiBulk(['?'], titles)).rejects.toThrow('Database not open');
@@ -301,6 +302,15 @@ describe('Database', () => {
                     expect.soft(result).toStrictEqual(expectedResults.value);
                 }
             }
+
+            // Test findTermGlossariesBulk
+            const termEntries = await dictionaryDatabase.findTermsBulk(['打', '打つ'], titles, 'exact');
+            expect.soft(termEntries.length).toBeGreaterThan(0);
+            const glossaries = await dictionaryDatabase.findTermGlossariesBulk([
+                ...termEntries.map(({id}) => ({id, dictionary: title})),
+                {id: termEntries[0].id, dictionary: 'Other Dictionary'},
+            ]);
+            expect.soft(glossaries).toStrictEqual([...termEntries.map(({definitions}) => definitions), []]);
 
             // Close
             await dictionaryDatabase.close();

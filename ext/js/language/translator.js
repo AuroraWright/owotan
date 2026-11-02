@@ -52,6 +52,8 @@ export class Translator {
         this._dictionaryFrequencyModeMap = null;
         /** @type {?Promise<Map<string, (import('dictionary-importer').Summary['frequencyMode'])>>} */
         this._dictionaryFrequencyModeMapPromise = null;
+        /** @type {WeakSet<import('dictionary').TermDefinition>} */
+        this._deferredDefinitions = new WeakSet();
     }
 
     /**
@@ -88,6 +90,7 @@ export class Translator {
         const {enabledDictionaryMap, excludeDictionaryDefinitions, sortFrequencyDictionary, sortFrequencyDictionaryOrder, language, primaryReading, useAllFrequencyDictionaries} = options;
         const tagAggregator = new TranslatorTagAggregator();
         let {dictionaryEntries, originalTextLength} = await this._findTermsInternal(text, options, tagAggregator, primaryReading);
+        await this._loadDeferredDefinitions(dictionaryEntries);
 
         switch (mode) {
             case 'group':
@@ -408,7 +411,7 @@ export class Translator {
             for (const entry of deinflection.databaseEntries) {
                 entry.definitions = entry.definitions.filter((definition) => !Array.isArray(definition));
             }
-            deinflection.databaseEntries = deinflection.databaseEntries.filter((entry) => entry.definitions.length);
+            deinflection.databaseEntries = deinflection.databaseEntries.filter((entry) => entry.definitions.length > 0 || (entry.deferredDefinitionCount ?? 0) > 0);
         }
         deinflections = deinflections.filter((deinflection) => deinflection.databaseEntries.length);
 
@@ -745,6 +748,9 @@ export class Translator {
                 await this._addSecondaryRelatedDictionaryEntries(language, groupedDictionaryEntries, ungroupedDictionaryEntriesMap, enabledDictionaryMap, secondarySearchDictionaryMap, tagAggregator, primaryReading);
             }
         }
+
+        // Grouping compares definition content, so the related entries added above need theirs first
+        await this._loadDeferredDefinitions(groupedDictionaryEntries.flatMap((group) => group.dictionaryEntries));
 
         const newDictionaryEntries = [];
         for (const group of groupedDictionaryEntries) {
@@ -1801,14 +1807,16 @@ export class Translator {
             definitionTags,
             termTags,
             definitions,
+            deferredDefinitionCount,
             score,
             dictionary,
             id,
             sequence: rawSequence,
             rules,
         } = databaseEntry;
+        const isDeferred = typeof deferredDefinitionCount === 'number';
         // Cast is safe because getDeinflections filters out deinflection definitions
-        const contentDefinitions = /** @type {import('dictionary-data').TermGlossaryContent[]} */ (definitions);
+        const contentDefinitions = isDeferred ? [] : /** @type {import('dictionary-data').TermGlossaryContent[]} */ (definitions);
         const reading = (rawReading.length > 0 ? rawReading : term);
         const matchPrimaryReading = primaryReading.length > 0 && reading === primaryReading;
         const {index: dictionaryIndex} = this._getDictionaryOrder(dictionary, enabledDictionaryMap);
@@ -1826,6 +1834,9 @@ export class Translator {
         tagAggregator.addTags(headwordTagGroups, dictionary, termTags);
         tagAggregator.addTags(definitionTagGroups, dictionary, definitionTags);
 
+        const definition = this._createTermDefinition(0, [0], dictionary, dictionaryIndex, dictionaryAlias, id, score, [sequence], isPrimary, definitionTagGroups, contentDefinitions);
+        if (isDeferred) { this._deferredDefinitions.add(definition); }
+
         return this._createTermDictionaryEntry(
             isPrimary,
             textProcessorRuleChainCandidates,
@@ -1837,8 +1848,30 @@ export class Translator {
             matchPrimaryReading,
             maxOriginalTextLength,
             [this._createTermHeadword(0, term, reading, [source], headwordTagGroups, rules)],
-            [this._createTermDefinition(0, [0], dictionary, dictionaryIndex, dictionaryAlias, id, score, [sequence], isPrimary, definitionTagGroups, contentDefinitions)],
+            [definition],
         );
+    }
+
+    /**
+     * Loads the definition content the database deferred, once the entries that need it are known.
+     * @param {Iterable<import('translation-internal').TermDictionaryEntry>} dictionaryEntries
+     */
+    async _loadDeferredDefinitions(dictionaryEntries) {
+        /** @type {import('dictionary').TermDefinition[]} */
+        const definitions = [];
+        for (const dictionaryEntry of dictionaryEntries) {
+            for (const definition of dictionaryEntry.definitions) {
+                if (!this._deferredDefinitions.has(definition)) { continue; }
+                this._deferredDefinitions.delete(definition);
+                definitions.push(definition);
+            }
+        }
+        if (definitions.length === 0) { return; }
+
+        const glossaries = await this._database.findTermGlossariesBulk(definitions.map(({id, dictionary}) => ({id, dictionary})));
+        for (let i = 0, ii = definitions.length; i < ii; ++i) {
+            definitions[i].entries = /** @type {import('dictionary-data').TermGlossaryContent[]} */ (glossaries[i].filter((glossary) => !Array.isArray(glossary)));
+        }
     }
 
     /**

@@ -40,6 +40,8 @@ export class DictionaryDatabase {
         this._createOnlyQuery4 = (item) => IDBKeyRange.only(item.path);
         /** @type {import('dictionary-database').CreateQuery<import('dictionary-database').DrawMediaGroupedRequest>} */
         this._createOnlyQuery5 = (item) => IDBKeyRange.only(item.path);
+        /** @type {import('dictionary-database').CreateQuery<import('dictionary-database').TermGlossaryRequest>} */
+        this._createOnlyQuery6 = (item) => IDBKeyRange.only(item.id);
         /** @type {import('dictionary-database').CreateQuery<string>} */
         this._createBoundQuery1 = (item) => IDBKeyRange.bound(item, `${item}\uffff`, false, false);
         /** @type {import('dictionary-database').CreateQuery<string>} */
@@ -368,6 +370,18 @@ export class DictionaryDatabase {
     }
 
     /**
+     * Loads the glossaries of term rows by id, for rows whose definitions were deferred.
+     * @param {import('dictionary-database').TermGlossaryRequest[]} items
+     * @returns {Promise<import('dictionary-data').TermGlossary[][]>}
+     */
+    async findTermGlossariesBulk(items) {
+        /** @type {import('dictionary-database').FindPredicate<import('dictionary-database').TermGlossaryRequest, import('dictionary-database').DatabaseTermEntryWithId>} */
+        const predicate = (row, item) => (row.dictionary === item.dictionary);
+        const rows = await this._findFirstBulk('terms', null, items, this._createOnlyQuery6, predicate);
+        return rows.map((row) => (typeof row !== 'undefined' ? row.glossary : []));
+    }
+
+    /**
      * @param {import('dictionary-database').DictionaryAndQueryRequest[]} items
      * @returns {Promise<(import('dictionary-database').Tag|undefined)[]>}
      */
@@ -681,7 +695,7 @@ export class DictionaryDatabase {
      * @template [TRow=unknown]
      * @template [TItem=unknown]
      * @param {import('dictionary-database').ObjectStoreName} objectStoreName
-     * @param {string} indexName
+     * @param {?string} indexName The index to search, or `null` for the primary key.
      * @param {TItem[]} items
      * @param {import('dictionary-database').CreateQuery<TItem>} createQuery
      * @param {import('dictionary-database').FindPredicate<TItem, TRow>} predicate
@@ -699,7 +713,7 @@ export class DictionaryDatabase {
 
             const transaction = this._db.transaction([objectStoreName], 'readonly');
             const objectStore = transaction.objectStore(objectStoreName);
-            const index = objectStore.index(indexName);
+            const index = indexName !== null ? objectStore.index(indexName) : objectStore;
             let completeCount = 0;
             /**
              * @param {TRow|undefined} row

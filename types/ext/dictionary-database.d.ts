@@ -70,6 +70,12 @@ export type TermEntry = {
     termTags: string[];
     rules: string[];
     definitions: DictionaryData.TermGlossary[];
+    /**
+     * Set when the database has not loaded the row's glossary content: `definitions` then holds only
+     * the deinflection definitions, and this is the number of other definitions, which
+     * `findTermGlossariesBulk` loads.
+     */
+    deferredDefinitionCount?: number;
     score: number;
     dictionary: string;
     id: number;
@@ -243,6 +249,11 @@ export type TermExactRequest = {
 
 export type MediaRequest = {
     path: string;
+    dictionary: string;
+};
+
+export type TermGlossaryRequest = {
+    id: number;
     dictionary: string;
 };
 

@@ -34,16 +34,17 @@ vi.stubGlobal('chrome', chrome);
 /**
  * @param {string} dictionaryDirectory
  * @param {string} dictionaryName
+ * @param {typeof DictionaryDatabase} [DatabaseClass]
  * @returns {Promise<{translator: Translator, styles: string}>}
  */
-export async function createTranslatorContext(dictionaryDirectory, dictionaryName) {
+export async function createTranslatorContext(dictionaryDirectory, dictionaryName, DatabaseClass = DictionaryDatabase) {
     // Dictionary
     const testDictionaryData = await createDictionaryArchiveData(dictionaryDirectory, dictionaryName);
 
     // Setup database
     const dictionaryImporterMediaLoader = new DictionaryImporterMediaLoader();
     const dictionaryImporter = new DictionaryImporter(dictionaryImporterMediaLoader);
-    const dictionaryDatabase = new DictionaryDatabase();
+    const dictionaryDatabase = new DatabaseClass();
     await dictionaryDatabase.prepare();
 
     const {errors, result} = await dictionaryImporter.importDictionary(
