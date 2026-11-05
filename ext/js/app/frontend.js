@@ -29,6 +29,14 @@ import {TextSourceRange} from '../dom/text-source-range.js';
 import {TextScanner} from '../language/text-scanner.js';
 
 /**
+ * How long to keep trying to unlock the audio of a popup whose frame is loading, in milliseconds, within the second
+ * that Safari carries a gesture through timers.
+ */
+const UNLOCK_AUDIO_RETRY_DURATION = 900;
+/** How often to try to unlock the audio of a popup whose frame is loading, in milliseconds. */
+const UNLOCK_AUDIO_RETRY_INTERVAL = 50;
+
+/**
  * This is the main class responsible for scanning and handling webpage content.
  */
 export class Frontend {
@@ -348,8 +356,9 @@ export class Frontend {
      * Lets the popup play audio, such as audio played automatically for a lookup, since the touch is a gesture.
      */
     _onTouchEnd() {
-        if (this._popup !== null) {
-            this._popup.unlockAudio();
+        const popup = this._popup;
+        if (popup !== null) {
+            this._unlockAudioWhenLoaded(() => popup.unlockAudio());
         }
     }
 
@@ -365,8 +374,23 @@ export class Frontend {
         if (action !== 'frontendUnlockAudio' || typeof params !== 'object' || params === null) { return; }
         const {id} = /** @type {{id?: unknown}} */ (params);
         if (typeof id === 'string') {
-            this._popupFactory.unlockAudio(id);
+            this._unlockAudioWhenLoaded(() => this._popupFactory.unlockAudio(id));
         }
+    }
+
+    /**
+     * Unlocks the audio of a popup during a gesture, retrying while its frame loads, as the popup of the first lookup
+     * is still loading when the touch ends. Safari carries a gesture through timers for about a second.
+     * @param {() => boolean} unlock Unlocks the audio, returning whether the popup could be sent the gesture.
+     */
+    _unlockAudioWhenLoaded(unlock) {
+        if (unlock()) { return; }
+        const start = safePerformance.now();
+        const retry = () => {
+            if (unlock() || safePerformance.now() - start >= UNLOCK_AUDIO_RETRY_DURATION) { return; }
+            setTimeout(retry, UNLOCK_AUDIO_RETRY_INTERVAL);
+        };
+        setTimeout(retry, UNLOCK_AUDIO_RETRY_INTERVAL);
     }
 
     /**

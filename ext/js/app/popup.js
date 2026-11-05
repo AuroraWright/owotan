@@ -383,9 +383,10 @@ export class Popup extends EventDispatcher {
     /**
      * Lets the popup play audio later without a gesture of its own, when called while a gesture is handled. Safari on
      * iOS plays audio only after a gesture has started it, and the message sent to the frame here carries the gesture.
+     * @returns {boolean} Whether the frame could be sent the gesture, which it cannot before it has loaded.
      */
     unlockAudio() {
-        this._invokeWindow('displayAudioUnlock', void 0);
+        return this._invokeWindow('displayAudioUnlock', void 0);
     }
 
     /**
@@ -848,15 +849,17 @@ export class Popup extends EventDispatcher {
      * @template {import('display').WindowApiNames} TName
      * @param {TName} action
      * @param {import('display').WindowApiParams<TName>} params
+     * @returns {boolean} Whether the message was sent.
      */
     _invokeWindow(action, params) {
         const contentWindow = this._frame.contentWindow;
-        if (this._frameClient === null || !this._frameClient.isConnected() || contentWindow === null) { return; }
+        if (this._frameClient === null || !this._frameClient.isConnected() || contentWindow === null) { return false; }
 
         /** @type {import('display').WindowApiMessage<TName>} */
         const message = {action, params};
         const messageWrapper = this._frameClient.createMessage(message);
         contentWindow.postMessage(messageWrapper, this._targetOrigin);
+        return true;
     }
 
     /**
