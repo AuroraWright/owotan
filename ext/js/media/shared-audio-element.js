@@ -19,9 +19,9 @@
 const SILENT_AUDIO_URL = 'data:audio/wav;base64,UklGRsQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YaAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
 
 /**
- * Plays audio on iOS, where an audio element loads and plays nothing unless a gesture starts it. An element that has
- * been played during a gesture once can play later without one, even with another source, so all audio is played on
- * one element, which `unlock` plays during a gesture.
+ * Plays audio in Safari, where an audio element plays nothing unless a gesture starts it, and on iOS loads nothing
+ * either. An element that has been played during a gesture once can play later without one, even with another source,
+ * so all audio is played on one element, which `unlock` plays during a gesture.
  */
 export class SharedAudioElement {
     constructor() {

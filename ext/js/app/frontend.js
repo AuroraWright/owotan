@@ -29,11 +29,11 @@ import {TextSourceRange} from '../dom/text-source-range.js';
 import {TextScanner} from '../language/text-scanner.js';
 
 /**
- * How long to keep trying to unlock the audio of a popup whose frame is loading, in milliseconds, within the second
- * that Safari carries a gesture through timers.
+ * How long to keep trying to unlock the audio of a popup that is not yet created or whose frame is loading, in
+ * milliseconds, within the second that Safari carries a gesture through timers.
  */
 const UNLOCK_AUDIO_RETRY_DURATION = 900;
-/** How often to try to unlock the audio of a popup whose frame is loading, in milliseconds. */
+/** How often to try to unlock the audio of a popup that is not yet created or whose frame is loading, in milliseconds. */
 const UNLOCK_AUDIO_RETRY_INTERVAL = 50;
 
 /**
@@ -182,7 +182,11 @@ export class Frontend {
 
         window.addEventListener('resize', this._onResize.bind(this), false);
         if (this._browser === 'safari') {
-            window.addEventListener('touchend', this._onTouchEnd.bind(this), {capture: true, passive: true});
+            // A key press counts too, so pressing the scanning modifier lets the popup of the lookup play audio.
+            const onGesture = this._onGesture.bind(this);
+            for (const type of ['touchend', 'mousedown', 'keydown']) {
+                window.addEventListener(type, onGesture, {capture: true, passive: true});
+            }
             window.addEventListener('message', this._onWindowMessage.bind(this), false);
         }
         addFullscreenChangeEventListener(this._updatePopup.bind(this));
@@ -353,13 +357,12 @@ export class Frontend {
     // Private
 
     /**
-     * Lets the popup play audio, such as audio played automatically for a lookup, since the touch is a gesture.
+     * Lets the popup play audio, such as audio played automatically for a lookup, since the event is a gesture. The
+     * popup of the first lookup can be created after the gesture, such as after the scanning modifier is pressed.
      */
-    _onTouchEnd() {
-        const popup = this._popup;
-        if (popup !== null) {
-            this._unlockAudioWhenLoaded(() => popup.unlockAudio());
-        }
+    _onGesture() {
+        if (!this._textScanner.isEnabled()) { return; } // Nothing is looked up, so the popup is not loaded either
+        this._unlockAudioWhenLoaded(() => this._popup !== null && this._popup.unlockAudio());
     }
 
     /**
@@ -379,8 +382,8 @@ export class Frontend {
     }
 
     /**
-     * Unlocks the audio of a popup during a gesture, retrying while its frame loads, as the popup of the first lookup
-     * is still loading when the touch ends. Safari carries a gesture through timers for about a second.
+     * Unlocks the audio of a popup during a gesture, retrying until it is created and its frame has loaded, as the
+     * popup of the first lookup is still loading when the gesture ends. Safari carries a gesture through timers for about a second.
      * @param {() => boolean} unlock Unlocks the audio, returning whether the popup could be sent the gesture.
      */
     _unlockAudioWhenLoaded(unlock) {

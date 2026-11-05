@@ -28,7 +28,7 @@ export class AudioSystem extends EventDispatcher {
     /**
      * @param {API?} api
      * @param {?import('./shared-audio-element.js').SharedAudioElement} sharedAudioElement The element to play audio
-     *   from URLs on, for iOS, which then downloads audio with the API.
+     *   from URLs on, for Safari, which then downloads audio with the API.
      */
     constructor(api, sharedAudioElement) {
         super();

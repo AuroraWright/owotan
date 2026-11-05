@@ -263,6 +263,11 @@ export class Display extends EventDispatcher {
         return this._platform;
     }
 
+    /** @type {?import('environment').Browser} */
+    get browser() {
+        return this._browser;
+    }
+
     /** @type {import('../input/hotkey-handler.js').HotkeyHandler} */
     get hotkeyHandler() {
         return this._hotkeyHandler;

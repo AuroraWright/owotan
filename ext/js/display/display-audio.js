@@ -33,7 +33,7 @@ export class DisplayAudio {
         /** @type {?import('display-audio').GenericAudio} */
         this._audioPlaying = null;
         /** @type {?SharedAudioElement} */
-        this._sharedAudioElement = display.platform === 'ios' ? new SharedAudioElement() : null;
+        this._sharedAudioElement = display.browser === 'safari' ? new SharedAudioElement() : null;
         /** @type {AudioSystem} */
         this._audioSystem = new AudioSystem(this._display.application.api, this._sharedAudioElement);
         /** @type {number} */
@@ -106,8 +106,12 @@ export class DisplayAudio {
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
         if (this._sharedAudioElement !== null) {
-            // Audio plays on iOS once a gesture has started it, so any touch in the popup lets audio play later.
-            document.addEventListener('touchend', this._unlockAudio.bind(this), {capture: true, passive: true});
+            // Audio plays in Safari once a gesture has started it, so any touch, click, or key press in the popup lets
+            // audio play later.
+            const unlockAudio = this._unlockAudio.bind(this);
+            for (const type of ['touchend', 'mousedown', 'keydown']) {
+                document.addEventListener(type, unlockAudio, {capture: true, passive: true});
+            }
         }
         this._display.on('optionsUpdated', this._onOptionsUpdated.bind(this));
         this._display.on('contentClear', this._onContentClear.bind(this));
@@ -285,7 +289,7 @@ export class DisplayAudio {
     }
 
     /**
-     * Called while a gesture is handled: a touch in the popup, or one on the page, whose message carries the gesture.
+     * Called while a gesture is handled: one in the popup, or one on the page, whose message carries the gesture.
      */
     _unlockAudio() {
         if (this._sharedAudioElement !== null) {
