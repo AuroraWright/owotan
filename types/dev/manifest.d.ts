@@ -38,6 +38,8 @@ export type ManifestVariant = {
     fileName?: string;
     fileCopies?: string[];
     excludeFiles?: string[];
+    /** The content of each page's viewport meta tag. Only builds into a directory use it. */
+    viewport?: string;
     modifications?: Modification[];
 };
 

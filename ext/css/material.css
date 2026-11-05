@@ -830,6 +830,7 @@ textarea.no-wrap {
 .input-group>input[type=password],
 .input-group>button.input-button {
     flex: 1 1 auto;
+    min-width: 0;
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
     border-right-style: none;

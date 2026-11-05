@@ -33,6 +33,10 @@ export class WebExtension extends EventDispatcher {
         } catch (e) {
             // NOP
         }
+        /** @type {Set<import('extension').ChromeRuntimeOnMessageCallback<import('application').ApiMessageAny>>} */
+        this._messageListeners = new Set();
+        /** @type {?chrome.runtime.Port} */
+        this._messagePort = null;
         /** @type {string} */
         this._extensionName = 'Extension';
         try {
@@ -107,6 +111,24 @@ export class WebExtension extends EventDispatcher {
     }
 
     /**
+     * Listens for the messages that the backend sends to this page's frame.
+     * @param {import('extension').ChromeRuntimeOnMessageCallback<import('application').ApiMessageAny>} callback
+     */
+    addMessageListener(callback) {
+        chrome.runtime.onMessage.addListener(callback);
+        this._messageListeners.add(callback);
+        this._connectMessagePort();
+    }
+
+    /**
+     * @param {import('extension').ChromeRuntimeOnMessageCallback<import('application').ApiMessageAny>} callback
+     */
+    removeMessageListener(callback) {
+        chrome.runtime.onMessage.removeListener(callback);
+        this._messageListeners.delete(callback);
+    }
+
+    /**
      * @returns {?Error}
      */
     getLastError() {
@@ -133,5 +155,55 @@ export class WebExtension extends EventDispatcher {
      */
     isExtensionUrl(url) {
         return this._extensionBaseUrl !== null && url.startsWith(this._extensionBaseUrl);
+    }
+
+    // Private
+
+    /**
+     * Safari does not deliver tabs.sendMessage to extension pages, nor to any frame of a tab that was open when
+     * the extension started, even after the tab reloads. So there the backend sends to a frame through a port
+     * that the frame opens, and which it opens again when the backend stops.
+     */
+    _connectMessagePort() {
+        if (this._messagePort !== null || this._extensionBaseUrl === null || !this._extensionBaseUrl.startsWith('safari-web-extension:')) { return; }
+        try {
+            this._messagePort = chrome.runtime.connect({name: 'tabMessages'});
+        } catch (e) {
+            this.triggerUnloaded();
+            return;
+        }
+        this._messagePort.onMessage.addListener(this._onMessagePortMessage.bind(this, this._messagePort));
+        this._messagePort.onDisconnect.addListener(() => {
+            this.getLastError();
+            this._messagePort = null;
+            this._connectMessagePort();
+        });
+    }
+
+    /**
+     * @param {chrome.runtime.Port} port
+     * @param {import('web-extension').PortMessage} data
+     */
+    _onMessagePortMessage(port, {id, message}) {
+        let responded = false;
+        /** @type {import('extension').ChromeRuntimeMessageSendResponseFunction} */
+        const sendResponse = (response) => {
+            if (responded) { return; }
+            responded = true;
+            if (id === null) { return; }
+            /** @type {import('web-extension').PortResponse} */
+            const portResponse = {id, response};
+            try {
+                port.postMessage(portResponse);
+            } catch (e) {
+                // The port disconnected, and the backend no longer waits for the response
+            }
+        };
+        let respondsLater = false;
+        for (const listener of this._messageListeners) {
+            if (listener(message, {id: chrome.runtime.id}, sendResponse) === true) { respondsLater = true; }
+        }
+        // As with runtime.onMessage, a message that no listener answers or will answer gets no response.
+        if (!respondsLater) { sendResponse(); }
     }
 }

@@ -104,29 +104,33 @@ export class DictionaryImporter {
         // Have hoshidicts parse, check and import the banks
         this._progressNextStep(0);
         this._progressNextStep(1);
-        const {files, report} = await this._importArchive(archiveContent);
-        ++this._progressData.index;
-        this._progress();
+        const {summary} = await this._importArchive(dictionaryDatabase, archiveContent, async (report) => {
+            ++this._progressData.index;
+            this._progress();
 
-        /** @type {import('dictionary-database').TagRecord[]} */
-        const tags = [...report.tags];
-        this._addOldIndexTags(index, tags);
-        /** @type {import('dictionary-importer').SummaryCounts} */
-        const counts = {
-            ...report.counts,
-            termMeta: createMetaCounts(report.counts.termMeta),
-            kanjiMeta: createMetaCounts(report.counts.kanjiMeta),
-            tagMeta: {total: tags.length},
-            media: {total: report.images.length},
-        };
+            /** @type {import('dictionary-database').TagRecord[]} */
+            const tags = [...report.tags];
+            this._addOldIndexTags(index, tags);
+            /** @type {import('dictionary-importer').SummaryCounts} */
+            const counts = {
+                ...report.counts,
+                termMeta: createMetaCounts(report.counts.termMeta),
+                kanjiMeta: createMetaCounts(report.counts.kanjiMeta),
+                tagMeta: {total: tags.length},
+                media: {total: report.images.length},
+            };
 
-        // Read the sizes of the images the glossaries show, then store the dictionary
-        this._progressNextStep(report.images.length + 1);
+            // Read the sizes of the images the glossaries show, then store the dictionary
+            this._progressNextStep(report.images.length + 1);
 
-        const media = await this._getImageSizes(fileMap, report.images, dictionaryTitle);
+            const media = await this._getImageSizes(fileMap, report.images, dictionaryTitle);
 
-        const summary = this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles: report.styles, yomitanVersion, importSuccess: true});
-        await dictionaryDatabase.addDictionary(files, {summary, media, tags});
+            return {
+                summary: this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles: report.styles, yomitanVersion, importSuccess: true}),
+                media,
+                tags,
+            };
+        });
         ++this._progressData.index;
         this._progress();
 
@@ -136,32 +140,30 @@ export class DictionaryImporter {
     }
 
     /**
-     * Imports the archive into a hoshidicts dictionary in memory. hoshidicts parses the banks, failing for a
+     * Has hoshidicts import the archive into the database's storage. hoshidicts parses the banks, failing for a
      * bank that does not hold the rows its name promises; their contents are not checked further.
+     * @param {import('./dictionary-database.js').DictionaryDatabase} dictionaryDatabase
      * @param {ArrayBuffer} archiveContent
-     * @returns {Promise<{files: import('dictionary-database').DictionaryFile[], report: import('hoshidicts').ImportReport}>}
+     * @param {(report: import('hoshidicts').ImportReport) => Promise<import('dictionary-database').DictionaryRecord>} createRecord
+     * @returns {Promise<import('dictionary-database').DictionaryRecord>}
      * @throws {Error}
      */
-    async _importArchive(archiveContent) {
+    async _importArchive(dictionaryDatabase, archiveContent, createRecord) {
         // Threads share memory, which only a cross-origin isolated context may. The threads' workers last as long
         // as the worker that runs the import.
         const hoshidicts = await Hoshidicts.create(isCrossOriginIsolated() ? Math.min(navigator.hardwareConcurrency || 1, 8) : null);
         const {fs} = hoshidicts;
-        fs.writeFile('/archive.zip', new Uint8Array(archiveContent));
-        fs.mkdir('/import');
-        const report = hoshidicts.import('/archive.zip', '/import');
-        const {success, error, directory} = report;
-        if (!success) {
-            throw new Error(error.startsWith('invalid data') ? `Dictionary has ${error}` : `Could not import dictionary: ${error}`);
-        }
-        fs.unlink('/archive.zip');
-        /** @type {import('dictionary-database').DictionaryFile[]} */
-        const files = [];
-        for (const name of fs.readdir(directory)) {
-            if (name === '.' || name === '..') { continue; }
-            files.push({name, content: fs.readFile(`${directory}/${name}`)});
-        }
-        return {files, report};
+        // hoshidicts reads the archive where it already is, rather than from a copy in its file system.
+        fs.mkdir('/archive');
+        fs.mount(hoshidicts.opfsFileSystem, {files: [{name: 'archive.zip', handle: createMemoryFile(new Uint8Array(archiveContent))}]}, '/archive');
+        return await dictionaryDatabase.addDictionary(hoshidicts, '/import', async () => {
+            const report = hoshidicts.import('/archive/archive.zip', '/import');
+            const {success, error} = report;
+            if (!success) {
+                throw new Error(error.startsWith('invalid data') ? `Dictionary has ${error}` : `Could not import dictionary: ${error}`);
+            }
+            return await createRecord(report);
+        });
     }
 
     /**
@@ -497,5 +499,22 @@ function createEmptyCounts() {
         kanjiMeta: {total: 0},
         tagMeta: {total: 0},
         media: {total: 0},
+    };
+}
+
+/**
+ * A stand-in for an origin private file system sync access handle over bytes in memory, which the engine's
+ * file system reads as it would a file.
+ * @param {Uint8Array} content
+ * @returns {{getSize: () => number, read: (buffer: ArrayBufferView, options: {at: number}) => number}}
+ */
+function createMemoryFile(content) {
+    return {
+        getSize: () => content.byteLength,
+        read: (buffer, {at}) => {
+            const length = Math.max(0, Math.min(buffer.byteLength, content.byteLength - at));
+            new Uint8Array(buffer.buffer, buffer.byteOffset, length).set(content.subarray(at, at + length));
+            return length;
+        },
     };
 }

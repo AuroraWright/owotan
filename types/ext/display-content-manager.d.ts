@@ -38,5 +38,5 @@ export type LoadMediaRequest = {
     /** The name of the dictionary. */
     dictionary: string;
     /** The canvas to draw the image onto. */
-    canvas: OffscreenCanvas;
+    canvas: HTMLCanvasElement;
 };

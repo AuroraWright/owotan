@@ -31,7 +31,14 @@
         <div class="settings-item"><div class="settings-item-inner">
             <div class="settings-item-left">
                 <div class="settings-item-label">Enable recommended permissions</div>
-                <div class="settings-item-description">This will allow Yomitan to scan text from most sites.</div>
+                <div class="settings-item-description">
+                    This will allow Yomitan to scan text from most sites.
+                    <p class="margin-above" data-show-for-browser="safari">
+                        Safari only lets you allow this in its own settings.
+                        On iPhone and iPad, go to Settings &rsaquo; Apps &rsaquo; Safari &rsaquo; Extensions &rsaquo; Yomitan and allow Other Websites.
+                        On Mac, go to Safari &rsaquo; Settings &rsaquo; Extensions, select Yomitan, then Edit Websites, and allow Other Websites.
+                    </p>
+                </div>
             </div>
             <div class="settings-item-right">
                 <label class="toggle"><input type="checkbox" id="recommended-permissions-toggle" data-origin="&lt;all_urls&gt;"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>

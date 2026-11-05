@@ -110,6 +110,16 @@ Feel free to join us on the [Yomitan Discord](https://discord.gg/YkQrXW6TXF).
 
 For more information, see [Contributing](./CONTRIBUTING.md#setup).
 
+### Safari
+
+Safari loads extensions from an app, which `npm run build:safari-app` builds with Xcode on macOS. It writes the Xcode project and the build to `builds/yomitan-safari-app`.
+
+- `npm run build:safari-app` builds the app for macOS, signed to run locally. Safari loads it while Develop > Developer Settings > Allow unsigned extensions is on.
+- `npm run build:safari-app -- --platform ios-simulator` builds the app for the iOS Simulator, where unsigned extensions are allowed in Settings > Apps > Safari > Extensions.
+- `npm run build:safari-app -- --platform ios --team {team} --ipa` builds `builds/yomitan-safari-app/ipa/Yomitan.ipa` to install on an iPhone or iPad, replacing `{team}` with the ID of your development team (shown in the Membership details of your Apple Developer account). It installs on the devices that the team has registered. Install it from Xcode's Devices and Simulators window, or with `xcrun devicectl device install app --device {device} builds/yomitan-safari-app/ipa/Yomitan.ipa`.
+
+With `--team`, Xcode signs the app for development with a certificate of that team, and creates or downloads the provisioning profiles it needs through the account signed in to Xcode. `--team` also signs a build for macOS, so that Safari loads it without allowing unsigned extensions. With `--ipa`, `--identity` picks the type of certificate that the IPA is signed with: `"Apple Development"` (the default), or `"Apple Distribution"` for an ad hoc build to share with testers.
+
 ## Third-Party Libraries
 
 Yomitan uses several third-party libraries to function.

@@ -17,7 +17,6 @@
  */
 
 import {parseJson} from '../core/json.js';
-import {isObjectNotArray} from '../core/object-utilities.js';
 import {HotkeyUtil} from './hotkey-util.js';
 
 export class HotkeyHelpController {
@@ -38,7 +37,7 @@ export class HotkeyHelpController {
     async prepare(api) {
         const {platform: {os}} = await api.getEnvironmentInfo();
         this._hotkeyUtil.os = os;
-        await this._setupGlobalCommands(this._globalActionHotkeys);
+        await this._setupGlobalCommands(this._globalActionHotkeys, api);
     }
 
     /**
@@ -90,31 +89,13 @@ export class HotkeyHelpController {
     // Private
 
     /**
-     * @returns {Promise<chrome.commands.Command[]>}
-     */
-    _getAllCommands() {
-        return new Promise((resolve, reject) => {
-            if (!(isObjectNotArray(chrome.commands) && typeof chrome.commands.getAll === 'function')) {
-                resolve([]);
-                return;
-            }
-
-            chrome.commands.getAll((result) => {
-                const e = chrome.runtime.lastError;
-                if (e) {
-                    reject(new Error(e.message));
-                } else {
-                    resolve(result);
-                }
-            });
-        });
-    }
-
-    /**
      * @param {Map<string, string>} commandMap
+     * @param {import('../comm/api.js').API} api
      */
-    async _setupGlobalCommands(commandMap) {
-        const commands = await this._getAllCommands();
+    async _setupGlobalCommands(commandMap, api) {
+        // Through the backend: Safari ends the process of a web page whose extension frame, such as the popup,
+        // uses the commands API.
+        const commands = await api.getAllCommands();
 
         commandMap.clear();
         for (const {name, shortcut} of commands) {

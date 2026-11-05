@@ -22,13 +22,17 @@ import {toError} from '../core/to-error.js';
 /**
  * This class is used to connect Yomitan to a native component that is
  * used to parse text into individual terms.
+ * Safari's extensions cannot reach native components other than their app's, so there it runs MeCab,
+ * compiled to WebAssembly, in a worker (mecab-worker-main.js), which answers the same messages.
  */
 export class Mecab {
     /**
      * Creates a new instance of the class.
      */
     constructor() {
-        /** @type {?chrome.runtime.Port} */
+        /** @type {boolean} */
+        this._useWorker = chrome.runtime.getURL('/').startsWith('safari-web-extension:');
+        /** @type {?import('mecab').Connection} */
         this._port = null;
         /** @type {number} */
         this._sequence = 0;
@@ -36,8 +40,11 @@ export class Mecab {
         this._invocations = new Map();
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
-        /** @type {number} */
-        this._timeout = 5000;
+        /**
+         * The worker reads the dictionaries for its first request, and an import writes one.
+         * @type {number}
+         */
+        this._timeout = this._useWorker ? 60000 : 5000;
         /** @type {number} */
         this._version = 1;
         /** @type {?number} */
@@ -139,6 +146,42 @@ export class Mecab {
         return this._convertParseTextResults(/** @type {import('mecab').ParseResultRaw} */ (rawResults));
     }
 
+    /**
+     * Whether MeCab runs in the extension, with dictionaries it stores itself, rather than as a native component.
+     * @returns {boolean}
+     */
+    hasStoredDictionaries() {
+        return this._useWorker;
+    }
+
+    /**
+     * Gets the names of the stored dictionaries. See `hasStoredDictionaries`.
+     * @returns {Promise<string[]>}
+     */
+    async getDictionaries() {
+        await this._setupPortWrapper();
+        return /** @type {string[]} */ (await this._invoke('get_dictionaries', {}));
+    }
+
+    /**
+     * Stores a dictionary from an archive like those the native component's installer downloads. See `hasStoredDictionaries`.
+     * @param {ArrayBuffer} archive
+     * @returns {Promise<string>} The dictionary's name.
+     */
+    async importDictionary(archive) {
+        await this._setupPortWrapper();
+        return /** @type {string} */ (await this._invoke('import_dictionary', {archive}));
+    }
+
+    /**
+     * Removes a stored dictionary. See `hasStoredDictionaries`.
+     * @param {string} name
+     */
+    async deleteDictionary(name) {
+        await this._setupPortWrapper();
+        await this._invoke('delete_dictionary', {name});
+    }
+
     // Private
 
     /**
@@ -147,15 +190,19 @@ export class Mecab {
     _onMessage(message) {
         if (typeof message !== 'object' || message === null) { return; }
 
-        const {sequence, data} = /** @type {import('core').SerializableObject} */ (message);
+        const {sequence, data, error} = /** @type {import('core').SerializableObject} */ (message);
         if (typeof sequence !== 'number') { return; }
 
         const invocation = this._invocations.get(sequence);
         if (typeof invocation === 'undefined') { return; }
 
-        const {resolve, timer} = invocation;
+        const {resolve, reject, timer} = invocation;
         clearTimeout(timer);
-        resolve(data);
+        if (typeof error === 'string') {
+            reject(new Error(error));
+        } else {
+            resolve(data);
+        }
         this._invocations.delete(sequence);
     }
 
@@ -175,7 +222,7 @@ export class Mecab {
 
     /**
      * @param {string} action
-     * @param {import('core').SerializableObject} params
+     * @param {{[key: string]: unknown}} params
      * @returns {Promise<unknown>}
      */
     _invoke(action, params) {
@@ -356,9 +403,22 @@ export class Mecab {
      * @returns {Promise<void>}
      */
     async _setupPort() {
-        const port = chrome.runtime.connectNative('yomitan_mecab');
-        this._eventListeners.addListener(port.onMessage, this._onMessage.bind(this));
-        this._eventListeners.addListener(port.onDisconnect, this._onDisconnect.bind(this));
+        /** @type {import('mecab').Connection} */
+        let port;
+        if (this._useWorker) {
+            const worker = new Worker(new URL('mecab-worker-main.js', import.meta.url), {type: 'module'});
+            this._eventListeners.addEventListener(worker, 'message', (/** @type {MessageEvent<unknown>} */ {data}) => this._onMessage(data));
+            this._eventListeners.addEventListener(worker, 'error', this._onDisconnect.bind(this));
+            port = {
+                postMessage: (message) => worker.postMessage(message),
+                disconnect: () => worker.terminate(),
+            };
+        } else {
+            const nativePort = chrome.runtime.connectNative('yomitan_mecab');
+            this._eventListeners.addListener(nativePort.onMessage, this._onMessage.bind(this));
+            this._eventListeners.addListener(nativePort.onDisconnect, this._onDisconnect.bind(this));
+            port = nativePort;
+        }
         this._port = port;
 
         try {

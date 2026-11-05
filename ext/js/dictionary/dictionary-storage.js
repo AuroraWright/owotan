@@ -16,12 +16,18 @@
  */
 
 import {parseJson} from '../core/json.js';
+import {BlobFileStore, BlobReadHandle} from '../data/blob-file-store.js';
 
 /**
  * The file in each dictionary's directory that holds what Yomitan knows of it. It is written last,
  * so a directory without it is an import that did not finish.
  */
 const RECORD_FILE_NAME = 'yomitan.json';
+/**
+ * The files hoshidicts may write when it imports a dictionary. The origin private file system only opens
+ * files asynchronously and hoshidicts creates them synchronously, so they are opened before it starts.
+ */
+const IMPORT_FILE_NAMES = ['blobs.bin', 'hash.table', 'bloom.filter', 'scan.idx', 'dict.zstd', 'media.bin', 'media.idx', 'index.json', '.hoshidicts_7'];
 
 /**
  * Stores each imported dictionary as a directory of hoshidicts files in the origin private file system.
@@ -54,15 +60,39 @@ export class OpfsDictionaryStorage {
     }
 
     /** @type {import('dictionary-database').DictionaryStorage['addDictionary']} */
-    async addDictionary(id, files, record) {
+    async addDictionary(id, hoshidicts, path, write) {
+        // hoshidicts writes the files straight into the dictionary's directory, so a large dictionary is never
+        // held in memory whole.
+        const {fs} = hoshidicts;
         const parent = await this._getDirectory();
         const directory = await parent.getDirectoryHandle(id, {create: true});
+        /** @type {{name: string, handle: FileSystemSyncAccessHandle}[]} */
+        const files = [];
+        let mounted = false;
         try {
-            for (const {name, content} of files) {
-                await writeFile(directory, name, content);
+            for (const name of IMPORT_FILE_NAMES) {
+                files.push({name, handle: await (await directory.getFileHandle(name, {create: true})).createSyncAccessHandle()});
+            }
+            fs.mkdir(path);
+            fs.mount(hoshidicts.opfsFileSystem, {files: [], newFiles: files}, path);
+            mounted = true;
+            const record = await write();
+            const written = new Set(findFiles(fs, path).map(({name}) => name));
+            fs.unmount(path);
+            fs.rmdir(path);
+            mounted = false;
+            for (const {handle} of files.splice(0)) { handle.close(); }
+            for (const name of IMPORT_FILE_NAMES) {
+                if (!written.has(name)) { await directory.removeEntry(name); }
             }
             await writeFile(directory, RECORD_FILE_NAME, new TextEncoder().encode(JSON.stringify(record)));
+            return record;
         } catch (e) {
+            if (mounted) {
+                fs.unmount(path);
+                fs.rmdir(path);
+            }
+            for (const {handle} of files) { handle.close(); }
             await parent.removeEntry(id, {recursive: true}).catch(() => {});
             throw e;
         }
@@ -72,6 +102,22 @@ export class OpfsDictionaryStorage {
     async deleteDictionary(id) {
         const directory = await this._getDirectory();
         await directory.removeEntry(id, {recursive: true});
+    }
+
+    /**
+     * Gets the hoshidicts files of a dictionary that is not mounted.
+     * @param {string} id
+     * @returns {Promise<import('blob-file-store').StoredFile[]>}
+     */
+    async getFiles(id) {
+        const directory = await (await this._getDirectory()).getDirectoryHandle(id);
+        /** @type {import('blob-file-store').StoredFile[]} */
+        const files = [];
+        for await (const handle of getDirectoryEntries(directory)) {
+            if (handle.kind !== 'file' || handle.name === RECORD_FILE_NAME) { continue; }
+            files.push({name: handle.name, blob: await /** @type {FileSystemFileHandle} */ (handle).getFile()});
+        }
+        return files;
     }
 
     /** @type {import('dictionary-database').DictionaryStorage['mount']} */
@@ -119,6 +165,69 @@ export class OpfsDictionaryStorage {
 }
 
 /**
+ * Stores each imported dictionary in IndexedDB, as Blobs of its hoshidicts files, for Safari, where the origin
+ * private file system does not keep them (BlobFileStore). hoshidicts imports into the origin private file
+ * system, which it writes as it goes, so a large dictionary is never held in memory whole; the files are moved
+ * here when it is done. Mounted dictionaries are read through `FileReaderSync`, so only in a worker.
+ */
+export class BlobDictionaryStorage {
+    constructor() {
+        /** @type {OpfsDictionaryStorage} */
+        this._importStorage = new OpfsDictionaryStorage();
+        /** @type {BlobFileStore<import('dictionary-database').DictionaryRecord>} */
+        this._store = new BlobFileStore('dictionaries');
+    }
+
+    /** @type {import('dictionary-database').DictionaryStorage['getDictionaries']} */
+    async getDictionaries() {
+        return (await this._store.getAll()).map(({id, record}) => ({id, record}));
+    }
+
+    /** @type {import('dictionary-database').DictionaryStorage['addDictionary']} */
+    async addDictionary(id, hoshidicts, path, write) {
+        const record = await this._importStorage.addDictionary(id, hoshidicts, path, write);
+        try {
+            await this._store.put({id, files: await this._importStorage.getFiles(id), record});
+        } finally {
+            await this._importStorage.deleteDictionary(id);
+        }
+        return record;
+    }
+
+    /** @type {import('dictionary-database').DictionaryStorage['deleteDictionary']} */
+    async deleteDictionary(id) {
+        await this._store.delete(id);
+    }
+
+    /** @type {import('dictionary-database').DictionaryStorage['mount']} */
+    async mount(hoshidicts, id, path) {
+        const entry = await this._store.get(id);
+        if (entry === null) { throw new Error(`No dictionary ${id}`); }
+        const files = entry.files.map(({name, blob}) => ({name, handle: new BlobReadHandle(blob)}));
+        return () => {
+            const {fs} = hoshidicts;
+            fs.mkdir(path);
+            fs.mount(hoshidicts.opfsFileSystem, {files}, path);
+        };
+    }
+
+    /** @type {import('dictionary-database').DictionaryStorage['unmount']} */
+    unmount(hoshidicts, path) {
+        const {fs} = hoshidicts;
+        fs.unmount(path);
+        fs.rmdir(path);
+    }
+}
+
+/**
+ * Creates the storage for dictionaries in this browser.
+ * @returns {import('dictionary-database').DictionaryStorage}
+ */
+export function createDictionaryStorage() {
+    return new URL(import.meta.url).protocol === 'safari-web-extension:' ? new BlobDictionaryStorage() : new OpfsDictionaryStorage();
+}
+
+/**
  * Keeps dictionaries in memory, for tests.
  */
 export class MemoryDictionaryStorage {
@@ -133,11 +242,19 @@ export class MemoryDictionaryStorage {
     }
 
     /** @type {import('dictionary-database').DictionaryStorage['addDictionary']} */
-    async addDictionary(id, files, record) {
-        this._dictionaries.set(id, {
-            files: files.map(({name, content}) => ({name, content: new Uint8Array(content)})),
-            record: structuredClone(record),
-        });
+    async addDictionary(id, hoshidicts, path, write) {
+        const {fs} = hoshidicts;
+        fs.mkdir(path);
+        try {
+            const record = await write();
+            this._dictionaries.set(id, {
+                files: findFiles(fs, path).map(({name, path: filePath}) => ({name, content: fs.readFile(filePath)})),
+                record: structuredClone(record),
+            });
+            return record;
+        } finally {
+            removeDirectory(fs, path);
+        }
     }
 
     /** @type {import('dictionary-database').DictionaryStorage['deleteDictionary']} */
@@ -176,6 +293,45 @@ export class MemoryDictionaryStorage {
 function getDirectoryEntries(directory) {
     // The async iteration methods are missing from the DOM types in use.
     return /** @type {{values: () => AsyncIterable<FileSystemHandle>}} */ (/** @type {unknown} */ (directory)).values();
+}
+
+/**
+ * Finds the files in a directory of the engine's file system and the directories in it. hoshidicts imports
+ * into a directory it names after the dictionary.
+ * @param {import('hoshidicts').FileSystem} fs
+ * @param {string} path
+ * @returns {{name: string, path: string}[]}
+ */
+function findFiles(fs, path) {
+    /** @type {{name: string, path: string}[]} */
+    const results = [];
+    for (const name of fs.readdir(path)) {
+        if (name === '.' || name === '..') { continue; }
+        const filePath = `${path}/${name}`;
+        if (fs.isDir(fs.stat(filePath).mode)) {
+            results.push(...findFiles(fs, filePath));
+        } else {
+            results.push({name, path: filePath});
+        }
+    }
+    return results;
+}
+
+/**
+ * @param {import('hoshidicts').FileSystem} fs
+ * @param {string} path
+ */
+function removeDirectory(fs, path) {
+    for (const name of fs.readdir(path)) {
+        if (name === '.' || name === '..') { continue; }
+        const filePath = `${path}/${name}`;
+        if (fs.isDir(fs.stat(filePath).mode)) {
+            removeDirectory(fs, filePath);
+        } else {
+            fs.unlink(filePath);
+        }
+    }
+    fs.rmdir(path);
 }
 
 /**

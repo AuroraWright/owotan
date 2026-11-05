@@ -37,6 +37,14 @@ export class API {
     }
 
     /**
+     * Whether drawMedia can draw images, which it does with the media drawing worker.
+     * @type {boolean}
+     */
+    get canDrawMedia() {
+        return this._mediaDrawingWorker !== null;
+    }
+
+    /**
      * @param {import('api').ApiParam<'optionsGet', 'optionsContext'>} optionsContext
      * @returns {Promise<import('api').ApiReturn<'optionsGet'>>}
      */
@@ -219,6 +227,13 @@ export class API {
      */
     getEnvironmentInfo() {
         return this._invoke('getEnvironmentInfo', void 0);
+    }
+
+    /**
+     * @returns {Promise<import('api').ApiReturn<'getAllCommands'>>}
+     */
+    getAllCommands() {
+        return this._invoke('getAllCommands', void 0);
     }
 
     /**
@@ -494,15 +509,11 @@ export class API {
      * @param {Transferable[]} transferables
      */
     _pmInvoke(action, params, transferables) {
-        // on firefox, there is no service worker, so we instead use a MessageChannel which is established
-        // via a handshake via a SharedWorker
-        if (!('serviceWorker' in navigator)) {
-            if (this._backendPort === null) {
-                log.error('no backend port available');
-                return;
-            }
+        // When the backend isn't a service worker, as on Firefox and Safari, we instead use a MessageChannel
+        // which is established via a handshake via a SharedWorker
+        if (this._backendPort !== null) {
             this._backendPort.postMessage({action, params}, transferables);
-        } else {
+        } else if ('serviceWorker' in navigator) {
             void navigator.serviceWorker.ready.then((serviceWorkerRegistration) => {
                 if (serviceWorkerRegistration.active !== null) {
                     serviceWorkerRegistration.active.postMessage({action, params}, transferables);
@@ -510,6 +521,8 @@ export class API {
                     log.error(`[${self.constructor.name}] no active service worker`);
                 }
             });
+        } else {
+            log.error('no backend port available');
         }
     }
 }

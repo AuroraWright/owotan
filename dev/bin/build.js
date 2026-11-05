@@ -204,12 +204,33 @@ async function build(buildDir, extDir, manifestUtil, variantNames, manifestPath,
                 }
             } else {
                 if (!dryRun) {
+                    fs.rmSync(fullFileName, {recursive: true, force: true});
                     fs.cpSync(extDir, fullFileName, {recursive: true});
+                    for (const excludeFile of excludeFiles) {
+                        fs.rmSync(path.join(fullFileName, excludeFile), {recursive: true, force: true});
+                    }
+                    if (typeof variant.viewport === 'string') {
+                        setViewport(fullFileName, variant.viewport);
+                    }
                 }
             }
         }
 
         process.stdout.write('\n');
+    }
+}
+
+/**
+ * Sets the viewport meta tag of each page in a directory.
+ * @param {string} directory
+ * @param {string} content
+ */
+function setViewport(directory, content) {
+    for (const fileName of fs.readdirSync(directory)) {
+        if (!fileName.endsWith('.html')) { continue; }
+        const filePath = path.join(directory, fileName);
+        const source = fs.readFileSync(filePath, {encoding: 'utf8'});
+        fs.writeFileSync(filePath, source.replace(/<meta name="viewport" content="[^"]*">/, `<meta name="viewport" content="${content}">`));
     }
 }
 

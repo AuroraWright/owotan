@@ -15,32 +15,45 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// An Emscripten JS library (not an ES module, so not .js): a read-only file system whose
+// An Emscripten JS library (not an ES module, so not .js): a file system whose
 // files are origin private file system sync access handles, which a dedicated
 // worker opens before mounting them. Reads go straight from the file into the
 // heap, so hoshidicts' paged storage reads only the pages a lookup needs.
 //
 // FS.mount(OPFSFS, {files: [{name, handle}]}, '/some/directory')
+//
+// A mount the program writes to also takes newFiles: creating a file of one of
+// those names, in any directory of the mount, gives it that handle. Creating a
+// file is synchronous and opening a handle is not, so the handles have to be
+// opened beforehand. Directories live only in memory. Anything that reads like
+// a sync access handle can stand in for one, such as an object over bytes that
+// are already in memory.
+//
+// FS.mount(OPFSFS, {files: [], newFiles: [{name, handle}]}, '/some/directory')
 
 addToLibrary({
     $OPFSFS__deps: ['$FS', '$mmapAlloc'],
     $OPFSFS: {
         DIR_MODE: {{{ cDefs.S_IFDIR | 0o555 }}},
+        WRITABLE_DIR_MODE: {{{ cDefs.S_IFDIR | 0o755 }}},
         FILE_MODE: {{{ cDefs.S_IFREG | 0o444 }}},
         mount(mount) {
-            var root = OPFSFS.createNode(null, '/', OPFSFS.DIR_MODE, null);
+            var newFiles = mount.opts['newFiles'] ?? [];
+            mount.newFiles = new Map(newFiles.map((file) => [file['name'], file['handle']]));
+            var root = OPFSFS.createNode(null, '/', newFiles.length > 0 ? OPFSFS.WRITABLE_DIR_MODE : OPFSFS.DIR_MODE, null);
             for (var file of mount.opts['files']) {
                 OPFSFS.createNode(root, file['name'], OPFSFS.FILE_MODE, file['handle']);
             }
             return root;
         },
-        createNode(parent, name, mode, handle) {
+        createNode(parent, name, mode, handle, writable = false) {
             var node = FS.createNode(parent, name, mode);
             node.node_ops = OPFSFS.node_ops;
             node.stream_ops = OPFSFS.stream_ops;
             node.atime = node.mtime = node.ctime = Date.now();
             if (handle !== null) {
                 node.handle = handle;
+                node.writable = writable;
                 node.size = handle.getSize();
             } else {
                 node.size = 4096;
@@ -70,22 +83,56 @@ addToLibrary({
                 };
             },
             setattr(node, attr) {
-                throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                if (attr.size !== undefined) {
+                    if (!node.writable) {
+                        throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                    }
+                    node.handle.truncate(attr.size);
+                    node.size = attr.size;
+                }
+                for (var key of ['mode', 'atime', 'mtime', 'ctime']) {
+                    if (attr[key] != null) {
+                        node[key] = attr[key];
+                    }
+                }
             },
+            // Every node is created up front or by mknod, which FS finds by name before asking here.
             lookup(parent, name) {
                 throw new FS.ErrnoError({{{ cDefs.ENOENT }}});
             },
             mknod(parent, name, mode, dev) {
-                throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                if (FS.isDir(mode)) {
+                    return OPFSFS.createNode(parent, name, mode, null);
+                }
+                var newFiles = parent.mount.newFiles;
+                var handle = FS.isFile(mode) ? newFiles.get(name) : undefined;
+                if (handle === undefined) {
+                    err(`OPFSFS: no file was opened for ${name}`);
+                    throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                }
+                newFiles.delete(name);
+                handle.truncate(0);
+                return OPFSFS.createNode(parent, name, mode, handle, true);
             },
             rename(oldNode, newDir, newName) {
                 throw new FS.ErrnoError({{{ cDefs.EPERM }}});
             },
+            // A removed file's handle can be created again.
             unlink(parent, name) {
-                throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                var node = parent.contents[name];
+                if (!node.writable) {
+                    throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                }
+                node.handle.truncate(0);
+                parent.mount.newFiles.set(name, node.handle);
+                delete parent.contents[name];
             },
             rmdir(parent, name) {
-                throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                var node = parent.contents[name];
+                if (Object.keys(node.contents).length > 0) {
+                    throw new FS.ErrnoError({{{ cDefs.ENOTEMPTY }}});
+                }
+                delete parent.contents[name];
             },
             readdir(node) {
                 return ['.', '..', ...Object.keys(node.contents)];
@@ -102,7 +149,14 @@ addToLibrary({
                 return stream.node.handle.read(buffer.subarray(offset, offset + length), {at: position});
             },
             write(stream, buffer, offset, length, position) {
-                throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                var node = stream.node;
+                if (!node.writable) {
+                    throw new FS.ErrnoError({{{ cDefs.EPERM }}});
+                }
+                var written = node.handle.write(buffer.subarray(offset, offset + length), {at: position});
+                node.size = Math.max(node.size, position + written);
+                node.mtime = node.ctime = Date.now();
+                return written;
             },
             llseek(stream, offset, whence) {
                 var position = offset;
@@ -116,9 +170,9 @@ addToLibrary({
                 }
                 return position;
             },
-            // Emscripten has no demand paging: a mapping is a copy.
+            // Emscripten has no demand paging: a mapping is a copy, which msync writes back.
             mmap(stream, length, position, prot, flags) {
-                if (prot & {{{ cDefs.PROT_WRITE }}}) {
+                if ((prot & {{{ cDefs.PROT_WRITE }}}) && !stream.node.writable) {
                     throw new FS.ErrnoError({{{ cDefs.EACCES }}});
                 }
                 var ptr = mmapAlloc(length);
@@ -130,6 +184,9 @@ addToLibrary({
                 return {ptr, allocated: true};
             },
             msync(stream, buffer, offset, length, mmapFlags) {
+                if (stream.node.writable && (stream.flags & {{{ cDefs.O_ACCMODE }}}) !== {{{ cDefs.O_RDONLY }}}) {
+                    OPFSFS.stream_ops.write(stream, buffer, 0, length, offset);
+                }
                 return 0;
             },
         },

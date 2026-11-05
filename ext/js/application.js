@@ -22,7 +22,6 @@ import {createApiMap, invokeApiMapHandler} from './core/api-map.js';
 import {EventDispatcher} from './core/event-dispatcher.js';
 import {ExtensionError} from './core/extension-error.js';
 import {log} from './core/log.js';
-import {deferPromise} from './core/utilities.js';
 import {WebExtension} from './extension/web-extension.js';
 
 /**
@@ -55,18 +54,9 @@ if (checkChromeNotAvailable()) {
  * @param {WebExtension} webExtension
  */
 async function waitForBackendReady(webExtension) {
-    const {promise, resolve} = /** @type {import('core').DeferredPromiseDetails<void>} */ (deferPromise());
-    /** @type {import('application').ApiMap} */
-    const apiMap = createApiMap([['applicationBackendReady', () => { resolve(); }]]);
-    /** @type {import('extension').ChromeRuntimeOnMessageCallback<import('application').ApiMessageAny>} */
-    const onMessage = ({action, params}, _sender, callback) => invokeApiMapHandler(apiMap, action, params, [], callback);
-    chrome.runtime.onMessage.addListener(onMessage);
-    try {
-        await webExtension.sendMessagePromise({action: 'requestBackendReadySignal'});
-        await promise;
-    } finally {
-        chrome.runtime.onMessage.removeListener(onMessage);
-    }
+    // The backend answers messages once it is prepared. A signal it sends to the tab would not reach an
+    // extension page in a frame of the tab in Safari, where tabs.sendMessage only reaches content scripts.
+    await webExtension.sendMessagePromise({action: 'requestBackendReadySignal'});
 }
 
 /**
@@ -161,7 +151,7 @@ export class Application extends EventDispatcher {
      * Prepares the instance for use.
      */
     prepare() {
-        chrome.runtime.onMessage.addListener(this._onMessage.bind(this));
+        this._webExtension.addMessageListener(this._onMessage.bind(this));
         log.on('logGenericError', this._onLogGenericError.bind(this));
     }
 
@@ -190,15 +180,23 @@ export class Application extends EventDispatcher {
      * @param {(application: Application) => (Promise<void>)} mainFunction
      */
     static async main(waitForDom, mainFunction) {
-        const supportsServiceWorker = 'serviceWorker' in navigator; // Basically, all browsers except Firefox. But it's possible Firefox will support it in the future, so we check in this fashion to be future-proof.
+        // The backend runs in a service worker in Chrome, and in a page in Firefox and Safari. Safari has service
+        // workers, so whether the browser supports them doesn't tell which.
+        const background = chrome.runtime.getManifest().background ?? {};
+        // Firefox fills in the manifest's missing keys with null.
+        const backendIsServiceWorker = 'service_worker' in background && typeof background.service_worker === 'string';
         const inExtensionContext = window.location.protocol === new URL(import.meta.url).protocol; // This code runs both in content script as well as in the iframe, so we need to differentiate the situation
+        // Safari gives each site its own SharedWorker, so a popup in a website would not reach the backend through
+        // one, and Safari on macOS ends any extension page that creates one. So in Safari, pages don't use the
+        // media drawing worker, which reaches the database through the backend, and draw images themselves.
+        const isSafari = new URL(import.meta.url).protocol === 'safari-web-extension:';
         /** @type {MessagePort | null} */
-        // If this is Firefox, we don't have a service worker and can't postMessage,
+        // If the backend isn't a service worker, we can't postMessage to it,
         // so we temporarily create a SharedWorker in order to establish a MessageChannel
         // which we can use to postMessage with the backend.
         // This can only be done in the extension context (aka iframe within popup),
         // not in the content script context.
-        const backendPort = !supportsServiceWorker && inExtensionContext ?
+        const backendPort = !backendIsServiceWorker && inExtensionContext && !isSafari ?
             (() => {
                 const sharedWorkerBridge = new SharedWorker(new URL('comm/shared-worker-bridge.js', import.meta.url), {type: 'module'});
                 const backendChannel = new MessageChannel();
@@ -212,7 +210,7 @@ export class Application extends EventDispatcher {
         log.configure(webExtension.extensionName);
 
         const mediaDrawingWorkerToBackendChannel = new MessageChannel();
-        const mediaDrawingWorker = inExtensionContext ? new Worker(new URL('display/media-drawing-worker.js', import.meta.url), {type: 'module'}) : null;
+        const mediaDrawingWorker = inExtensionContext && !isSafari ? new Worker(new URL('display/media-drawing-worker.js', import.meta.url), {type: 'module'}) : null;
         mediaDrawingWorker?.postMessage({action: 'connectToDatabaseWorker'}, [mediaDrawingWorkerToBackendChannel.port2]);
 
         const api = new API(webExtension, mediaDrawingWorker, backendPort);

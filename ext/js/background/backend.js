@@ -139,6 +139,12 @@ export class Backend {
         this._permissions = null;
         /** @type {Map<string, (() => void)[]>} */
         this._applicationReadyHandlers = new Map();
+        /** @type {Map<number, Map<number, chrome.runtime.Port>>} */
+        this._tabMessagePorts = new Map();
+        /** @type {Map<number, {port: chrome.runtime.Port, callback: (response: unknown) => void}>} */
+        this._tabMessagePortCallbacks = new Map();
+        /** @type {number} */
+        this._tabMessagePortNextId = 0;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -166,6 +172,7 @@ export class Backend {
             ['injectStylesheet',             this._onApiInjectStylesheet.bind(this)],
             ['getStylesheetContent',         this._onApiGetStylesheetContent.bind(this)],
             ['getEnvironmentInfo',           this._onApiGetEnvironmentInfo.bind(this)],
+            ['getAllCommands',               this._onApiGetAllCommands.bind(this)],
             ['clipboardGet',                 this._onApiClipboardGet.bind(this)],
             ['getZoom',                      this._onApiGetZoom.bind(this)],
             ['getDefaultAnkiFieldTemplates', this._onApiGetDefaultAnkiFieldTemplates.bind(this)],
@@ -257,6 +264,7 @@ export class Backend {
 
         const onMessage = this._onMessageWrapper.bind(this);
         chrome.runtime.onMessage.addListener(onMessage);
+        chrome.runtime.onConnect.addListener(this._onConnect.bind(this));
 
         // On Chrome, this is for receiving messages sent with navigator.serviceWorker, which has the benefit of being able to transfer objects, but doesn't accept callbacks
         (/** @type {ServiceWorkerGlobalScope & typeof globalThis} */ (globalThis)).addEventListener('message', this._onPmMessage.bind(this));
@@ -310,7 +318,8 @@ export class Backend {
             this._clipboardReader.browser = this._environment.getInfo().browser;
 
             // if this is Firefox and therefore not running in Service Worker, we need to use a SharedWorker to setup a MessageChannel to postMessage with the popup
-            if (self.constructor.name === 'Window') {
+            // Safari's pages don't use one; see Application.main.
+            if (self.constructor.name === 'Window' && this._environment.getInfo().browser !== 'safari') {
                 const sharedWorkerBridge = new SharedWorker(new URL('../comm/shared-worker-bridge.js', import.meta.url), {type: 'module'});
                 sharedWorkerBridge.port.postMessage({action: 'registerBackendPort'});
                 sharedWorkerBridge.port.addEventListener('message', (/** @type {MessageEvent} */ e) => {
@@ -342,9 +351,6 @@ export class Backend {
             }
 
             this._clipboardMonitor.on('change', this._onClipboardTextChange.bind(this));
-
-            this._sendMessageAllTabsIgnoreResponse({action: 'applicationBackendReady'});
-            this._sendMessageIgnoreResponse({action: 'applicationBackendReady'});
         } catch (e) {
             log.error(e);
             throw e;
@@ -438,6 +444,44 @@ export class Backend {
         return true;
     }
 
+    /**
+     * Keeps the port that a frame opens to receive the messages for it. See WebExtension.addMessageListener.
+     * @param {chrome.runtime.Port} port
+     */
+    _onConnect(port) {
+        if (port.name !== 'tabMessages') { return; }
+        const tabId = port.sender?.tab?.id;
+        const frameId = port.sender?.frameId;
+        if (typeof tabId !== 'number' || typeof frameId !== 'number') { return; }
+
+        let framePorts = this._tabMessagePorts.get(tabId);
+        if (typeof framePorts === 'undefined') {
+            framePorts = new Map();
+            this._tabMessagePorts.set(tabId, framePorts);
+        }
+        framePorts.set(frameId, port);
+
+        port.onMessage.addListener((/** @type {import('web-extension').PortResponse} */ {id, response}) => {
+            const details = this._tabMessagePortCallbacks.get(id);
+            if (typeof details === 'undefined' || details.port !== port) { return; }
+            this._tabMessagePortCallbacks.delete(id);
+            details.callback(response);
+        });
+        port.onDisconnect.addListener(() => {
+            this._checkLastError(chrome.runtime.lastError);
+            const framePorts2 = this._tabMessagePorts.get(tabId);
+            if (typeof framePorts2 !== 'undefined' && framePorts2.get(frameId) === port) {
+                framePorts2.delete(frameId);
+                if (framePorts2.size === 0) { this._tabMessagePorts.delete(tabId); }
+            }
+            for (const [id, details] of this._tabMessagePortCallbacks) {
+                if (details.port !== port) { continue; }
+                this._tabMessagePortCallbacks.delete(id);
+                details.callback(void 0);
+            }
+        });
+    }
+
     // WebExtension event handlers
 
     /**
@@ -516,20 +560,9 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'requestBackendReadySignal'>} */
-    _onApiRequestBackendReadySignal(_params, sender) {
-        // Tab ID isn't set in background (e.g. browser_action)
-        /** @type {import('application').ApiMessage<'applicationBackendReady'>} */
-        const data = {action: 'applicationBackendReady'};
-        if (typeof sender.tab === 'undefined') {
-            this._sendMessageIgnoreResponse(data);
-            return false;
-        } else {
-            const {id} = sender.tab;
-            if (typeof id === 'number') {
-                this._sendMessageTabIgnoreResponse(id, data, {});
-            }
-            return true;
-        }
+    _onApiRequestBackendReadySignal() {
+        // Messages wait for the backend to be prepared, so answering is the signal.
+        return true;
     }
 
     /** @type {import('api').ApiHandler<'optionsGet'>} */
@@ -885,6 +918,24 @@ export class Backend {
         return this._environment.getInfo();
     }
 
+    /** @type {import('api').ApiHandler<'getAllCommands'>} */
+    _onApiGetAllCommands() {
+        return new Promise((resolve, reject) => {
+            if (!(isObjectNotArray(chrome.commands) && typeof chrome.commands.getAll === 'function')) {
+                resolve([]);
+                return;
+            }
+            chrome.commands.getAll((result) => {
+                const e = chrome.runtime.lastError;
+                if (e) {
+                    reject(new Error(e.message));
+                } else {
+                    resolve(result);
+                }
+            });
+        });
+    }
+
     /** @type {import('api').ApiHandler<'clipboardGet'>} */
     async _onApiClipboardGet() {
         return this._clipboardReader.getText(false);
@@ -1041,6 +1092,10 @@ export class Backend {
             const localVersion = this._mecab.getLocalVersion();
             if (version !== localVersion) {
                 throw new Error(`MeCab component version not supported: ${version}`);
+            }
+
+            if (this._mecab.hasStoredDictionaries() && (await this._mecab.getDictionaries()).length === 0) {
+                throw new Error('No MeCab dictionary has been imported');
             }
         } finally {
             // Disconnect if the connection was previously disconnected
@@ -1568,6 +1623,7 @@ export class Backend {
 
         this._mecab.setEnabled(options.parsing.enableMecabParser && enabled);
 
+        this._yomitanApi.setServerUrl(options.general.yomitanApiServer);
         void this._yomitanApi.setEnabled(options.general.enableYomitanApi && enabled);
 
         if (options.clipboard.enableBackgroundMonitor && enabled) {
@@ -2299,11 +2355,26 @@ export class Backend {
     }
 
     /**
+     * Sends to the frames that opened a port for their messages through it, and to the others with tabs.sendMessage.
      * @param {number} tabId
      * @param {import('application').ApiMessageAny} message
      * @param {chrome.tabs.MessageSendOptions} options
      */
     _sendMessageTabIgnoreResponse(tabId, message, options) {
+        const framePorts = this._tabMessagePorts.get(tabId);
+        if (typeof framePorts !== 'undefined') {
+            const {frameId} = options;
+            const port = typeof frameId === 'number' ? framePorts.get(frameId) : void 0;
+            if (typeof frameId !== 'number' || typeof port !== 'undefined') {
+                /** @type {import('web-extension').PortMessage} */
+                const portMessage = {id: null, message};
+                for (const port2 of typeof port !== 'undefined' ? [port] : framePorts.values()) {
+                    port2.postMessage(portMessage);
+                }
+                return;
+            }
+        }
+
         const callback = () => this._checkLastError(chrome.runtime.lastError);
         chrome.tabs.sendMessage(tabId, message, options, callback);
     }
@@ -2312,12 +2383,11 @@ export class Backend {
      * @param {import('application').ApiMessageAny} message
      */
     _sendMessageAllTabsIgnoreResponse(message) {
-        const callback = () => this._checkLastError(chrome.runtime.lastError);
         chrome.tabs.query({}, (tabs) => {
             for (const tab of tabs) {
                 const {id} = tab;
                 if (typeof id !== 'number') { continue; }
-                chrome.tabs.sendMessage(id, message, callback);
+                this._sendMessageTabIgnoreResponse(id, message, {});
             }
         });
     }
@@ -2341,6 +2411,17 @@ export class Backend {
                     reject(error);
                 }
             };
+
+            const {frameId} = options;
+            const port = typeof frameId === 'number' ? this._tabMessagePorts.get(tabId)?.get(frameId) : void 0;
+            if (typeof port !== 'undefined') {
+                const id = this._tabMessagePortNextId++;
+                this._tabMessagePortCallbacks.set(id, {port, callback});
+                /** @type {import('web-extension').PortMessage} */
+                const portMessage = {id, message: /** @type {import('application').ApiMessageAny} */ (message)};
+                port.postMessage(portMessage);
+                return;
+            }
 
             chrome.tabs.sendMessage(tabId, message, options, callback);
         });

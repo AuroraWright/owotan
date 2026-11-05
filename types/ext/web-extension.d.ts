@@ -15,6 +15,20 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import type * as Application from './application';
+
 export type Events = {
     unloaded: Record<string, never>;
+};
+
+/** A message that the backend sends to a frame through the frame's port, with the ID the frame responds with, if any. */
+export type PortMessage = {
+    id: number | null;
+    message: Application.ApiMessageAny;
+};
+
+/** A frame's response to a message that the backend sent through the frame's port. */
+export type PortResponse = {
+    id: number;
+    response: unknown;
 };

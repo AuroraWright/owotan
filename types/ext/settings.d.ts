@@ -154,6 +154,7 @@ export type GeneralOptions = {
     sortFrequencyDictionaryOrder: SortFrequencyDictionaryOrder;
     stickySearchHeader: boolean;
     enableYomitanApi: boolean;
+    yomitanApiServer: string;
     yomitanApiAllowCssSanitizationBypass: boolean;
 };
 

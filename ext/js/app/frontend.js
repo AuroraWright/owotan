@@ -182,7 +182,7 @@ export class Frontend {
         this._application.on('optionsUpdated', this.updateOptions.bind(this));
         this._application.on('zoomChanged', this._onZoomChanged.bind(this));
         this._application.on('closePopups', this._onClosePopups.bind(this));
-        chrome.runtime.onMessage.addListener(this._onRuntimeMessage.bind(this));
+        this._application.webExtension.addMessageListener(this._onRuntimeMessage.bind(this));
 
         this._textScanner.on('clear', this._onTextScannerClear.bind(this));
         this._textScanner.on('searchSuccess', this._onSearchSuccess.bind(this));
@@ -924,7 +924,7 @@ export class Frontend {
                     clearTimeout(timeoutId);
                     timeoutId = null;
                 }
-                chrome.runtime.onMessage.removeListener(onMessage);
+                this._application.webExtension.removeMessageListener(onMessage);
             };
             /** @type {import('extension').ChromeRuntimeOnMessageCallback<import('application').ApiMessageAny>} */
             const onMessage = (message, _sender, sendResponse) => {
@@ -948,7 +948,7 @@ export class Frontend {
                 }, timeout);
             }
 
-            chrome.runtime.onMessage.addListener(onMessage);
+            this._application.webExtension.addMessageListener(onMessage);
             void this._application.api.broadcastTab({action: 'frontendRequestReadyBroadcast', params: {frameId: this._application.frameId}});
         });
     }

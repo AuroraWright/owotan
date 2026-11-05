@@ -415,6 +415,11 @@ export class TextScanner extends EventDispatcher {
         if (this._selectText && this._userHasNotSelectedAnythingManually && textSource !== null) {
             this._yomitanIsChangingTextSelectionNow = true;
             textSource.select();
+            // Safari on iOS only shows the selection of the frame that has focus, and tapping text in a frame,
+            // such as a popup, does not focus it.
+            if (this._browser === 'safari' && !document.hasFocus()) {
+                window.focus();
+            }
             if (this._textSelectionTimer !== null) { clearTimeout(this._textSelectionTimer); }
             // This timeout uses a 50ms delay to ensure that the selectionchange event has time to occur.
             // If the delay is 0ms, the timeout will sometimes complete before the event.
@@ -828,11 +833,31 @@ export class TextScanner extends EventDispatcher {
 
         if (!allowSearch) { return; }
 
+        void this._onPrimaryTouchEndSearch(e, x, y, touchReleaseTime);
+    }
+
+    /**
+     * @param {TouchEvent|PointerEvent} e
+     * @param {number} x
+     * @param {number} y
+     * @param {number} touchReleaseTime
+     */
+    async _onPrimaryTouchEndSearch(e, x, y, touchReleaseTime) {
+        const touchTapValid = this._touchTapValid;
         const inputInfo = this._getMatchingInputGroupFromEvent('touch', 'touchEnd', e);
-        if (inputInfo === null || inputInfo.input === null) { return; }
-        if (touchReleaseTime - this._touchPressTime < inputInfo.input.minimumTouchTime) { return; }
-        if (inputInfo.input.scanOnTouchRelease || (inputInfo.input.scanOnTouchTap && this._touchTapValid)) {
-            void this._searchAtFromTouchEnd(x, y, inputInfo);
+        if (
+            inputInfo !== null &&
+            inputInfo.input !== null &&
+            touchReleaseTime - this._touchPressTime >= inputInfo.input.minimumTouchTime &&
+            (inputInfo.input.scanOnTouchRelease || (inputInfo.input.scanOnTouchTap && touchTapValid))
+        ) {
+            await this._searchAtFromTouchEnd(x, y, inputInfo);
+        }
+
+        // Safari on iOS only sends the mouse events that follow a tap when the element tapped handles clicks,
+        // so a tap elsewhere would not clear as the mousedown after it does in other browsers.
+        if (this._browser === 'safari' && touchTapValid && !this._preventNextMouseDown) {
+            this._triggerClear('mousedown');
         }
     }
 

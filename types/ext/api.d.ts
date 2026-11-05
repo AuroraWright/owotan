@@ -276,6 +276,10 @@ type ApiSurface = {
         params: void;
         return: Environment.Info;
     };
+    getAllCommands: {
+        params: void;
+        return: chrome.commands.Command[];
+    };
     clipboardGet: {
         params: void;
         return: string;

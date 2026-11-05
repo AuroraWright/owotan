@@ -126,15 +126,18 @@ export class DictionaryDatabaseEngine {
     }
 
     /**
-     * Stores an imported dictionary.
-     * @param {import('dictionary-database').DictionaryFile[]} files
-     * @param {import('dictionary-database').DictionaryRecord} record
+     * Stores a dictionary hoshidicts imports.
+     * @param {import('./hoshidicts.js').Hoshidicts} hoshidicts The engine that imports it, which is not this one's.
+     * @param {string} path Where `write` has hoshidicts import it.
+     * @param {() => Promise<import('dictionary-database').DictionaryRecord>} write
+     * @returns {Promise<import('dictionary-database').DictionaryRecord>} The record `write` returned.
      */
-    async addDictionary(files, record) {
+    async addDictionary(hoshidicts, path, write) {
         this._ensureOpen();
-        await this._enqueue(async () => {
-            await this._storage.addDictionary(`${Date.now().toString(36)}-${generateId(4)}`, files, record);
+        return await this._enqueue(async () => {
+            const record = await this._storage.addDictionary(`${Date.now().toString(36)}-${generateId(4)}`, hoshidicts, path, write);
             await this._readDictionaries();
+            return record;
         });
     }
 

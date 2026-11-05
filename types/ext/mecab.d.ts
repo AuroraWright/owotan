@@ -68,3 +68,9 @@ export type ParseFragment = {
     /** The lemma reading/base reading. */
     lemma_reading: string;
 };
+
+/** The connection to MeCab: a native messaging port, or the worker that runs it in the extension. */
+export type Connection = {
+    postMessage(message: unknown): void;
+    disconnect(): void;
+};

@@ -19,16 +19,16 @@ import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {log} from '../core/log.js';
 import {DictionaryDatabaseEngine} from './dictionary-database-engine.js';
-import {OpfsDictionaryStorage} from './dictionary-storage.js';
+import {createDictionaryStorage} from './dictionary-storage.js';
 
 /**
  * Hosts the dictionary database's engine. The dictionaries are read through origin private file
- * system sync access handles, which only a dedicated worker can open.
+ * system sync access handles, or in Safari through `FileReaderSync`, which only a dedicated worker can use.
  */
 export class DictionaryDatabaseWorkerHandler {
     constructor() {
         /** @type {DictionaryDatabaseEngine} */
-        this._engine = new DictionaryDatabaseEngine(new OpfsDictionaryStorage());
+        this._engine = new DictionaryDatabaseEngine(createDictionaryStorage());
         /** @type {Promise<void>} */
         this._preparePromise = Promise.resolve();
         /** @type {import('dictionary-database').ApiMap} */

@@ -392,6 +392,22 @@ export class CrossFrameAPI {
         extendApiMap(this._apiMap, handlers);
     }
 
+    /**
+     * Connects to another frame of this tab through a message port the two frames share, instead of one the backend
+     * opens. Safari only connects the backend's ports to content scripts, so an extension page in a frame, such as
+     * the popup, can only be reached this way.
+     * @param {number} otherFrameId
+     * @param {MessagePort} messagePort
+     * @throws {Error}
+     */
+    connectFrame(otherFrameId, messagePort) {
+        const tabId = this._tabId;
+        if (typeof tabId !== 'number') { throw new Error('Unknown tab id'); }
+        const previous = this._commPorts.get(tabId)?.get(otherFrameId);
+        if (typeof previous !== 'undefined') { previous.disconnect(); }
+        this._setupCommPort(tabId, otherFrameId, createRuntimePort(messagePort));
+    }
+
     // Private
 
     /**
@@ -484,4 +500,48 @@ export class CrossFrameAPI {
         commPort.on('disconnect', this._onDisconnectBind);
         return commPort;
     }
+}
+
+/**
+ * Gives a message port the parts of a runtime port's interface that CrossFrameAPIPort uses. A message port has no
+ * disconnect event, so the port is only disconnected from this side.
+ * @param {MessagePort} messagePort
+ * @returns {chrome.runtime.Port}
+ */
+function createRuntimePort(messagePort) {
+    /** @type {Set<(message: unknown) => void>} */
+    const messageListeners = new Set();
+    /** @type {Set<() => void>} */
+    const disconnectListeners = new Set();
+    messagePort.addEventListener('message', (event) => {
+        for (const listener of messageListeners) { listener(event.data); }
+    });
+    messagePort.start();
+    return /** @type {chrome.runtime.Port} */ (/** @type {unknown} */ ({
+        name: '',
+        /**
+         * @param {unknown} message
+         */
+        postMessage(message) {
+            messagePort.postMessage(message);
+        },
+        disconnect() {
+            messagePort.close();
+        },
+        onMessage: createListenerSet(messageListeners),
+        onDisconnect: createListenerSet(disconnectListeners),
+    }));
+}
+
+/**
+ * @template {(...args: never[]) => void} TListener
+ * @param {Set<TListener>} listeners
+ * @returns {{addListener: (listener: TListener) => void, removeListener: (listener: TListener) => void, hasListener: (listener: TListener) => boolean}}
+ */
+function createListenerSet(listeners) {
+    return {
+        addListener: (listener) => { listeners.add(listener); },
+        removeListener: (listener) => { listeners.delete(listener); },
+        hasListener: (listener) => listeners.has(listener),
+    };
 }

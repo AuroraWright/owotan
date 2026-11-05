@@ -36,12 +36,36 @@ function ankiFieldMarkerMayUseClipboard(marker) {
 }
 
 /**
+ * Safari has no clipboardRead permission. There the clipboard is read through the extension's app with native
+ * messaging (ClipboardReader), which the extension always has, so clipboardRead stands for nativeMessaging.
+ * @returns {boolean}
+ */
+function isClipboardReadThroughNativeMessaging() {
+    return chrome.runtime.getURL('/').startsWith('safari-web-extension:');
+}
+
+/**
+ * Converts the permissions Yomitan asks about into those the browser knows.
+ * @param {chrome.permissions.Permissions} permissions
+ * @param {boolean} removing Whether the permissions are to be removed, which nativeMessaging cannot be in Safari.
+ * @returns {chrome.permissions.Permissions}
+ */
+function getBrowserPermissions(permissions, removing) {
+    const {permissions: names} = permissions;
+    if (typeof names === 'undefined' || !names.includes('clipboardRead') || !isClipboardReadThroughNativeMessaging()) { return permissions; }
+    /** @type {chrome.runtime.ManifestPermission[]} */
+    const browserNames = names.filter((name) => name !== 'clipboardRead');
+    if (!removing && !browserNames.includes('nativeMessaging')) { browserNames.push('nativeMessaging'); }
+    return {...permissions, permissions: browserNames};
+}
+
+/**
  * @param {chrome.permissions.Permissions} permissions
  * @returns {Promise<boolean>}
  */
 export function hasPermissions(permissions) {
     return new Promise((resolve, reject) => {
-        chrome.permissions.contains(permissions, (result) => {
+        chrome.permissions.contains(getBrowserPermissions(permissions, false), (result) => {
             const e = chrome.runtime.lastError;
             if (e) {
                 reject(new Error(e.message));
@@ -61,7 +85,7 @@ export function setPermissionsGranted(permissions, shouldHave) {
     return (
         shouldHave ?
         new Promise((resolve, reject) => {
-            chrome.permissions.request(permissions, (result) => {
+            chrome.permissions.request(getBrowserPermissions(permissions, false), (result) => {
                 const e = chrome.runtime.lastError;
                 if (e) {
                     reject(new Error(e.message));
@@ -71,7 +95,7 @@ export function setPermissionsGranted(permissions, shouldHave) {
             });
         }) :
         new Promise((resolve, reject) => {
-            chrome.permissions.remove(permissions, (result) => {
+            chrome.permissions.remove(getBrowserPermissions(permissions, true), (result) => {
                 const e = chrome.runtime.lastError;
                 if (e) {
                     reject(new Error(e.message));
@@ -93,6 +117,10 @@ export function getAllPermissions() {
             if (e) {
                 reject(new Error(e.message));
             } else {
+                const {permissions} = result;
+                if (typeof permissions !== 'undefined' && permissions.includes('nativeMessaging') && isClipboardReadThroughNativeMessaging()) {
+                    result = {...result, permissions: [...permissions, 'clipboardRead']};
+                }
                 resolve(result);
             }
         });

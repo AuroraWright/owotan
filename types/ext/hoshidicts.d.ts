@@ -34,7 +34,7 @@ export type FileSystem = {
 
 export type Module = {
     FS: FileSystem;
-    /** Emscripten's file system type for files that are origin private file system sync access handles. */
+    /** Emscripten's file system type for files that are origin private file system sync access handles, which can also take the files a program creates. */
     OPFSFS: unknown;
     HEAPU8: Uint8Array;
     /** Wraps an exported C function, converting `'string'` arguments and results. */

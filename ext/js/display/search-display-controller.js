@@ -19,6 +19,7 @@
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
+import {setPermissionsGranted} from '../data/permissions-util.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {isComposing} from '../language/ime-utilities.js';
 import {convertToKana, convertToKanaIME} from '../language/ja/japanese-wanakana.js';
@@ -91,7 +92,7 @@ export class SearchDisplayController {
 
         this._searchPersistentStateController.on('modeChange', this._onModeChange.bind(this));
 
-        chrome.runtime.onMessage.addListener(this._onMessage.bind(this));
+        this._display.application.webExtension.addMessageListener(this._onMessage.bind(this));
         this._display.application.on('optionsUpdated', this._onOptionsUpdated.bind(this));
 
         this._display.on('optionsUpdated', this._onDisplayOptionsUpdated.bind(this));
@@ -598,16 +599,12 @@ export class SearchDisplayController {
      * @param {chrome.runtime.ManifestPermission[]} permissions
      * @returns {Promise<boolean>}
      */
-    _requestPermissions(permissions) {
-        return new Promise((resolve) => {
-            chrome.permissions.request(
-                {permissions},
-                (granted) => {
-                    const e = chrome.runtime.lastError;
-                    resolve(!e && granted);
-                },
-            );
-        });
+    async _requestPermissions(permissions) {
+        try {
+            return await setPermissionsGranted({permissions}, true);
+        } catch (e) {
+            return false;
+        }
     }
 
     /**

@@ -564,9 +564,10 @@ export class Popup extends EventDispatcher {
             }
         };
 
-        const frameClient = new FrameClient();
+        const frameClient = new FrameClient(this._application.webExtension);
         this._frameClient = frameClient;
         await frameClient.connect(this._frame, this._targetOrigin, this._frameId, setupFrame);
+        this._application.crossFrame.connectFrame(frameClient.frameId, frameClient.port);
         this._frameConnected = true;
 
         // Reattach mouse event listeners after frame injection

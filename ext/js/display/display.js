@@ -32,6 +32,7 @@ import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {ScrollElement} from '../dom/scroll-element.js';
 import {TextSourceGenerator} from '../dom/text-source-generator.js';
+import {adaptCssForWebKit} from '../dom/webkit-css-util.js';
 import {HotkeyHelpController} from '../input/hotkey-help-controller.js';
 import {TextScanner} from '../language/text-scanner.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
@@ -158,7 +159,7 @@ export class Display extends EventDispatcher {
         /** @type {boolean} */
         this._childrenSupported = true;
         /** @type {?FrameEndpoint} */
-        this._frameEndpoint = (pageType === 'popup' ? new FrameEndpoint(this._application.api) : null);
+        this._frameEndpoint = (pageType === 'popup' ? new FrameEndpoint(this._application.api, this._application.crossFrame) : null);
         /** @type {?import('environment').Browser} */
         this._browser = null;
         /** @type {?import('environment').OperatingSystem} */
@@ -542,6 +543,9 @@ export class Display extends EventDispatcher {
      * @param {string} css
      */
     setCustomCss(css) {
+        if (this._browser === 'safari') {
+            css = adaptCssForWebKit(css);
+        }
         if (this._styleNode === null) {
             if (css.length === 0) { return; }
             this._styleNode = document.createElement('style');

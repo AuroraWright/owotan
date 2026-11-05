@@ -32,6 +32,7 @@ import {AudioDownloader} from '../media/audio-downloader.js';
 import {getFileExtensionFromAudioMediaType, getFileExtensionFromImageMediaType} from '../media/media-util.js';
 import {getDictionaryEntryMedia} from '../pages/settings/anki-deck-generator-controller.js';
 import {AnkiTemplateRenderer} from '../templates/anki-template-renderer.js';
+import {YomitanApiAppConnection} from './yomitan-api-app-connection.js';
 
 /** */
 export class YomitanApi {
@@ -40,7 +41,7 @@ export class YomitanApi {
      * @param {OffscreenProxy?} offscreen
      */
     constructor(apiMap, offscreen) {
-        /** @type {?chrome.runtime.Port} */
+        /** @type {?chrome.runtime.Port|YomitanApiAppConnection} */
         this._port = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
@@ -62,6 +63,22 @@ export class YomitanApi {
         this._audioDownloader = new AudioDownloader(this._requestBuilder);
         /** @type {OffscreenProxy?} */
         this._offscreen = offscreen;
+        /**
+         * Where the Safari app serves the API (see `_setupPort`). Elsewhere the native component chooses.
+         * @type {string}
+         */
+        this._serverUrl = 'http://127.0.0.1:19633';
+    }
+
+    /**
+     * @param {string} url
+     */
+    setServerUrl(url) {
+        if (url === this._serverUrl) { return; }
+        this._serverUrl = url;
+        if (this._port instanceof YomitanApiAppConnection) {
+            this._clearPort();
+        }
     }
 
     /**
@@ -599,6 +616,15 @@ export class YomitanApi {
      * @returns {Promise<void>}
      */
     async _setupPort() {
+        // Safari's extensions cannot reach native components other than their app's, so on macOS that app serves the API.
+        if (chrome.runtime.getURL('/').startsWith('safari-web-extension:')) {
+            const port = new YomitanApiAppConnection(this._serverUrl);
+            this._eventListeners.addListener(port.onMessage, this._onMessage.bind(this));
+            this._eventListeners.addListener(port.onDisconnect, this._onDisconnect.bind(this));
+            this._port = port;
+            port.start();
+            return;
+        }
         const port = chrome.runtime.connectNative('yomitan_api');
         this._eventListeners.addListener(port.onMessage, this._onMessage.bind(this));
         this._eventListeners.addListener(port.onDisconnect, this._onDisconnect.bind(this));

@@ -20,19 +20,35 @@ import {isObjectNotArray} from '../core/object-utilities.js';
 import {deferPromise, generateId} from '../core/utilities.js';
 
 export class FrameClient {
-    constructor() {
+    /**
+     * @param {import('../extension/web-extension.js').WebExtension} webExtension
+     */
+    constructor(webExtension) {
+        /** @type {import('../extension/web-extension.js').WebExtension} */
+        this._webExtension = webExtension;
         /** @type {?string} */
         this._secret = null;
         /** @type {?string} */
         this._token = null;
         /** @type {?number} */
         this._frameId = null;
+        /** @type {?MessagePort} */
+        this._port = null;
     }
 
     /** @type {number} */
     get frameId() {
         if (this._frameId === null) { throw new Error('Not connected'); }
         return this._frameId;
+    }
+
+    /**
+     * A port to the frame, whose other end the frame received with the connection.
+     * @type {MessagePort}
+     */
+    get port() {
+        if (this._port === null) { throw new Error('Not connected'); }
+        return this._port;
     }
 
     /**
@@ -43,10 +59,11 @@ export class FrameClient {
      * @param {number} [timeout]
      */
     async connect(frame, targetOrigin, hostFrameId, setupFrame, timeout = 10000) {
-        const {secret, token, frameId} = await this._connectInternal(frame, targetOrigin, hostFrameId, setupFrame, timeout);
+        const {secret, token, frameId, port} = await this._connectInternal(frame, targetOrigin, hostFrameId, setupFrame, timeout);
         this._secret = secret;
         this._token = token;
         this._frameId = frameId;
+        this._port = port;
     }
 
     /**
@@ -79,11 +96,11 @@ export class FrameClient {
      * @param {number} hostFrameId
      * @param {(frame: import('extension').HtmlElementWithContentWindow) => void} setupFrame
      * @param {number} timeout
-     * @returns {Promise<{secret: string, token: string, frameId: number}>}
+     * @returns {Promise<{secret: string, token: string, frameId: number, port: MessagePort}>}
      */
     _connectInternal(frame, targetOrigin, hostFrameId, setupFrame, timeout) {
         return new Promise((resolve, reject) => {
-            /** @type {Map<string, string>} */
+            /** @type {Map<string, {token: string, port: MessagePort}>} */
             const tokenMap = new Map();
             /** @type {?import('core').Timeout} */
             let timer = null;
@@ -95,9 +112,10 @@ export class FrameClient {
             /**
              * @param {string} action
              * @param {import('core').SerializableObject} params
+             * @param {Transferable[]} transfer
              * @throws {Error}
              */
-            const postMessage = (action, params) => {
+            const postMessage = (action, params, transfer) => {
                 const contentWindow = frame.contentWindow;
                 if (contentWindow === null) { throw new Error('Frame missing content window'); }
 
@@ -109,7 +127,7 @@ export class FrameClient {
                 }
                 if (!validOrigin) { throw new Error('Unexpected frame origin'); }
 
-                contentWindow.postMessage({action, params}, targetOrigin);
+                contentWindow.postMessage({action, params}, targetOrigin, transfer);
             };
 
             /** @type {import('extension').ChromeRuntimeOnMessageCallback<import('application').ApiMessageAny>} */
@@ -134,18 +152,19 @@ export class FrameClient {
                             {
                                 const {secret} = params;
                                 const token = generateId(16);
-                                tokenMap.set(secret, token);
-                                postMessage('frameEndpointConnect', {secret, token, hostFrameId});
+                                const {port1, port2} = new MessageChannel();
+                                tokenMap.set(secret, {token, port: port1});
+                                postMessage('frameEndpointConnect', {secret, token, hostFrameId}, [port2]);
                             }
                             break;
                         case 'frameEndpointConnected':
                             {
                                 const {secret, token} = params;
                                 const frameId = message.frameId;
-                                const token2 = tokenMap.get(secret);
-                                if (typeof token2 !== 'undefined' && token === token2 && typeof frameId === 'number') {
+                                const connection = tokenMap.get(secret);
+                                if (typeof connection !== 'undefined' && token === connection.token && typeof frameId === 'number') {
                                     cleanup();
-                                    resolve({secret, token, frameId});
+                                    resolve({secret, token, frameId, port: connection.port});
                                 }
                             }
                             break;
@@ -183,7 +202,7 @@ export class FrameClient {
                     frameLoadedReject = null;
                 }
 
-                chrome.runtime.onMessage.removeListener(onMessage);
+                this._webExtension.removeMessageListener(onMessage);
                 frame.removeEventListener('load', onLoad);
             };
 
@@ -193,7 +212,7 @@ export class FrameClient {
                 reject(new Error('Timeout'));
             }, timeout);
 
-            chrome.runtime.onMessage.addListener(onMessage);
+            this._webExtension.addMessageListener(onMessage);
             frame.addEventListener('load', onLoad);
 
             // Prevent unhandled rejections

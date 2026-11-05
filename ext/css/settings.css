@@ -1799,7 +1799,7 @@ code.anki-field-marker {
 }
 .anki-card-templates-test-table {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-rows: auto;
     align-items: center;
     width: 100%;
@@ -1901,7 +1901,7 @@ code.anki-field-marker {
 }
 .scan-input-grid {
     display: grid;
-    grid-template-columns: auto auto 1fr auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
     grid-template-rows: auto;
     width: 100%;
     column-gap: 0.25em;
@@ -2192,7 +2192,7 @@ input.sentence-termination-character-input2 {
 }
 .hotkey-list-item-grid {
     display: grid;
-    grid-template-columns: auto auto 1fr auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
     grid-template-rows: auto;
     grid-template-areas:
         'index input-label  input  button'
@@ -2228,6 +2228,7 @@ input.sentence-termination-character-input2 {
 }
 .hotkey-list-item-input {
     flex: 1 1 auto;
+    min-width: 0;
 }
 .hotkey-list-item-action-label-cell {
     grid-area: action-label;
@@ -2243,6 +2244,7 @@ input.sentence-termination-character-input2 {
 }
 .hotkey-list-item-action {
     flex: 1 1 auto;
+    min-width: 0;
 }
 .hotkey-list-item-enabled-button-container {
     margin-left: 0.375em;
@@ -2268,6 +2270,7 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
 .hotkey-list-item-action-argument-container {
     margin-left: 0.375em;
     flex: 1 1 auto;
+    min-width: 0;
     display: flex;
     flex-flow: row nowrap;
     align-items: stretch;
@@ -2730,12 +2733,14 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
 :root[data-os=cros] [data-show-for-os]:not([data-show-for-os~=cros]),
 :root[data-os=linux] [data-show-for-os]:not([data-show-for-os~=linux]),
 :root[data-os=openbsd] [data-show-for-os]:not([data-show-for-os~=openbsd]),
+:root[data-os=ios] [data-show-for-os]:not([data-show-for-os~=ios]),
 :root[data-os=mac] [data-hide-for-os~=mac],
 :root[data-os=win] [data-hide-for-os~=win],
 :root[data-os=android] [data-hide-for-os~=android],
 :root[data-os=cros] [data-hide-for-os~=cros],
 :root[data-os=linux] [data-hide-for-os~=linux],
-:root[data-os=openbsd] [data-hide-for-os~=openbsd] {
+:root[data-os=openbsd] [data-hide-for-os~=openbsd],
+:root[data-os=ios] [data-hide-for-os~=ios] {
     display: none;
 }
 
@@ -2761,6 +2766,25 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     :root {
         --custom-css-dim-size: 100%;
         --custom-css-modal-background: var(--dim-background-color);
+    }
+    .sentence-termination-character-list-table {
+        min-width: 0;
+    }
+    .sentence-termination-character-list-table thead td {
+        white-space: normal;
+        hyphens: auto;
+        -webkit-hyphens: auto;
+    }
+    .sentence-termination-character-include-list {
+        flex-flow: column nowrap;
+        align-items: flex-start;
+    }
+    .sentence-termination-character-include+.sentence-termination-character-include {
+        margin-left: 0;
+    }
+    code.anki-field-marker {
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 }
 

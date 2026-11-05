@@ -22,13 +22,14 @@ import {DictionaryDatabaseEngine} from './dictionary-database-engine.js';
 
 /**
  * The dictionary database. Dictionaries are hoshidicts dictionaries; by default they are stored in the
- * origin private file system and read by a dedicated worker, which this class forwards requests to.
+ * origin private file system, or in Safari in IndexedDB (dictionary-storage.js), and read by a dedicated
+ * worker, which this class forwards requests to.
  */
 export class DictionaryDatabase {
     /**
      * @param {?import('dictionary-database').DictionaryStorage} [storage] A storage to read in this context
      *   instead of using the worker. A context that only imports dictionaries and reads their summaries can
-     *   use the origin private file system storage directly; its dictionaries are never opened here.
+     *   use the storage directly; its dictionaries are never opened here.
      */
     constructor(storage = null) {
         /** @type {?DictionaryDatabaseEngine} */
@@ -110,12 +111,18 @@ export class DictionaryDatabase {
     }
 
     /**
-     * Stores an imported dictionary.
-     * @param {import('dictionary-database').DictionaryFile[]} files
-     * @param {import('dictionary-database').DictionaryRecord} record
+     * Stores a dictionary hoshidicts imports. Only a database that has its storage in this context can, as
+     * `write` cannot be sent to the worker.
+     * @param {import('./hoshidicts.js').Hoshidicts} hoshidicts
+     * @param {string} path
+     * @param {() => Promise<import('dictionary-database').DictionaryRecord>} write
+     * @returns {Promise<import('dictionary-database').DictionaryRecord>} The record `write` returned.
      */
-    async addDictionary(files, record) {
-        await this._call('addDictionary', files, record);
+    async addDictionary(hoshidicts, path, write) {
+        if (this._engine === null) {
+            throw new Error('Dictionaries can only be added with a storage in this context');
+        }
+        return await this._engine.addDictionary(hoshidicts, path, write);
     }
 
     /**

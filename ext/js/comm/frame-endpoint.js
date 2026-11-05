@@ -23,10 +23,13 @@ import {generateId} from '../core/utilities.js';
 export class FrameEndpoint {
     /**
      * @param {import('../comm/api.js').API} api
+     * @param {import('../comm/cross-frame-api.js').CrossFrameAPI} crossFrame
      */
-    constructor(api) {
+    constructor(api, crossFrame) {
         /** @type {import('../comm/api.js').API} */
         this._api = api;
+        /** @type {import('../comm/cross-frame-api.js').CrossFrameAPI} */
+        this._crossFrame = crossFrame;
         /** @type {string} */
         this._secret = generateId(16);
         /** @type {?string} */
@@ -99,7 +102,14 @@ export class FrameEndpoint {
             return;
         }
 
+        const [port] = event.ports;
+        if (typeof port === 'undefined') {
+            log.error('Missing port');
+            return;
+        }
+
         this._token = token;
+        this._crossFrame.connectFrame(hostFrameId, port);
 
         this._eventListeners.removeAllEventListeners();
         /** @type {import('frame-client').FrameEndpointConnectedDetails} */

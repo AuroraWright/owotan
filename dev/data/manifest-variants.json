@@ -141,7 +141,11 @@
             "excludeFiles": [
                 "background.html",
                 "lib/hoshidicts.js",
-                "lib/hoshidicts.wasm"
+                "lib/hoshidicts.wasm",
+                "js/comm/mecab-worker-main.js",
+                "lib/mecab.js",
+                "lib/mecab.wasm",
+                "css/safari-page.css"
             ]
         },
         {
@@ -171,7 +175,11 @@
             "excludeFiles": [
                 "background.html",
                 "lib/hoshidicts.js",
-                "lib/hoshidicts.wasm"
+                "lib/hoshidicts.wasm",
+                "js/comm/mecab-worker-main.js",
+                "lib/mecab.js",
+                "lib/mecab.wasm",
+                "css/safari-page.css"
             ]
         },
         {
@@ -199,7 +207,11 @@
             "excludeFiles": [
                 "background.html",
                 "lib/hoshidicts.js",
-                "lib/hoshidicts.wasm"
+                "lib/hoshidicts.wasm",
+                "js/comm/mecab-worker-main.js",
+                "lib/mecab.js",
+                "lib/mecab.wasm",
+                "css/safari-page.css"
             ]
         },
         {
@@ -307,7 +319,11 @@
                 "js/background/offscreen.js",
                 "js/background/offscreen-main.js",
                 "lib/hoshidicts-threads.js",
-                "lib/hoshidicts-threads.wasm"
+                "lib/hoshidicts-threads.wasm",
+                "js/comm/mecab-worker-main.js",
+                "lib/mecab.js",
+                "lib/mecab.wasm",
+                "css/safari-page.css"
             ]
         },
         {
@@ -358,7 +374,11 @@
                 "js/background/offscreen.js",
                 "js/background/offscreen-main.js",
                 "lib/hoshidicts-threads.js",
-                "lib/hoshidicts-threads.wasm"
+                "lib/hoshidicts-threads.wasm",
+                "js/comm/mecab-worker-main.js",
+                "lib/mecab.js",
+                "lib/mecab.wasm",
+                "css/safari-page.css"
             ]
         },
         {
@@ -368,25 +388,23 @@
         },
         {
             "name": "safari",
+            "inherit": "firefox",
+            "fileName": "yomitan-safari",
+            "viewport": "width=device-width,initial-scale=1,maximum-scale=1",
             "modifications": [
                 {
                     "action": "delete",
                     "path": [
-                        "cross_origin_embedder_policy"
-                    ]
-                },
-                {
-                    "action": "delete",
-                    "path": [
-                        "cross_origin_opener_policy"
+                        "browser_specific_settings"
                     ]
                 },
                 {
                     "action": "set",
                     "path": [
-                        "author"
+                        "background",
+                        "persistent"
                     ],
-                    "value": "Yomidevs"
+                    "value": false
                 },
                 {
                     "action": "remove",
@@ -398,9 +416,18 @@
                 {
                     "action": "remove",
                     "path": [
+                        "optional_permissions"
+                    ],
+                    "item": "nativeMessaging"
+                },
+                {
+                    "action": "add",
+                    "path": [
                         "permissions"
                     ],
-                    "item": "offscreen"
+                    "items": [
+                        "nativeMessaging"
+                    ]
                 },
                 {
                     "action": "delete",
@@ -413,15 +440,21 @@
                 {
                     "action": "delete",
                     "path": [
-                        "sandbox"
+                        "content_scripts",
+                        0,
+                        "match_origin_as_fallback"
                     ]
                 },
                 {
                     "action": "set",
                     "path": [
-                        "content_security_policy"
+                        "content_scripts",
+                        0,
+                        "css"
                     ],
-                    "value": "default-src 'self'; script-src 'self' 'unsafe-eval'; img-src blob: 'self'; style-src 'self' 'unsafe-inline'; media-src *; connect-src *"
+                    "value": [
+                        "css/safari-page.css"
+                    ]
                 }
             ],
             "excludeFiles": [
@@ -440,7 +473,11 @@
             "excludeFiles": [
                 "background.html",
                 "lib/hoshidicts.js",
-                "lib/hoshidicts.wasm"
+                "lib/hoshidicts.wasm",
+                "js/comm/mecab-worker-main.js",
+                "lib/mecab.js",
+                "lib/mecab.wasm",
+                "css/safari-page.css"
             ]
         }
     ]

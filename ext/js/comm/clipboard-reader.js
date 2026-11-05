@@ -76,6 +76,11 @@ export class ClipboardReader {
               being an extension with clipboard permissions. It effectively asks for the
               non-extension permission for clipboard access.
         */
+        if (this._browser === 'safari') {
+            const {text} = await this._sendSafariNativeMessage('getClipboardText');
+            return typeof text === 'string' ? text : '';
+        }
+
         if (this._isFirefox() && !useRichText) {
             try {
                 return await navigator.clipboard.readText();
@@ -115,6 +120,11 @@ export class ClipboardReader {
      */
     async getImage() {
         // See browser-specific notes in getText
+        if (this._browser === 'safari') {
+            const {image} = await this._sendSafariNativeMessage('getClipboardImage');
+            return typeof image === 'string' ? image : null;
+        }
+
         if (
             this._isFirefox() &&
             typeof navigator.clipboard !== 'undefined' &&
@@ -158,6 +168,27 @@ export class ClipboardReader {
     }
 
     // Private
+
+    /**
+     * Safari does not let extensions read the clipboard, so the app extension that holds this one reads it.
+     * @param {string} action
+     * @returns {Promise<{[key: string]: unknown}>}
+     */
+    _sendSafariNativeMessage(action) {
+        return new Promise((resolve, reject) => {
+            // Safari sends native messages to the app extension whichever application is named.
+            chrome.runtime.sendNativeMessage('application.id', {action}, (/** @type {unknown} */ response) => {
+                const error = chrome.runtime.lastError;
+                if (error) {
+                    reject(new Error(`Cannot read clipboard: ${error.message}`));
+                } else if (typeof response !== 'object' || response === null || 'error' in response) {
+                    reject(new Error('Cannot read clipboard'));
+                } else {
+                    resolve(/** @type {{[key: string]: unknown}} */ (response));
+                }
+            });
+        });
+    }
 
     /**
      * @returns {boolean}

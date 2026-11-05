@@ -206,7 +206,12 @@ export type DictionaryFile = {
 /** Where imported dictionaries are kept. */
 export interface DictionaryStorage {
     getDictionaries(): Promise<StoredDictionary[]>;
-    addDictionary(id: string, files: DictionaryFile[], record: DictionaryRecord): Promise<void>;
+    /**
+     * Prepares a directory at `path` in the file system of `hoshidicts`, calls `write`, which has hoshidicts
+     * import a dictionary into it, then stores the files it wrote with the record `write` returns, and
+     * returns that record.
+     */
+    addDictionary(id: string, hoshidicts: Hoshidicts, path: string, write: () => Promise<DictionaryRecord>): Promise<DictionaryRecord>;
     deleteDictionary(id: string): Promise<void>;
     /**
      * Opens what mounting a dictionary needs and returns a function that mounts it at `path` in the
