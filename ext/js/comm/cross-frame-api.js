@@ -33,8 +33,10 @@ export class CrossFrameAPIPort extends EventDispatcher {
      * @param {number} otherFrameId
      * @param {chrome.runtime.Port} port
      * @param {import('cross-frame-api').ApiMap} apiMap
+     * @param {boolean} pageScoped Whether the port is shared only by frames of this page, which are frozen and
+     *   restored with it, so that it still works when the page is restored from the back/forward cache.
      */
-    constructor(otherTabId, otherFrameId, port, apiMap) {
+    constructor(otherTabId, otherFrameId, port, apiMap, pageScoped) {
         super();
         /** @type {number} */
         this._otherTabId = otherTabId;
@@ -50,6 +52,8 @@ export class CrossFrameAPIPort extends EventDispatcher {
         this._invocationId = 0;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
+        /** @type {boolean} */
+        this._pageScoped = pageScoped;
     }
 
     /** @type {number} */
@@ -69,6 +73,7 @@ export class CrossFrameAPIPort extends EventDispatcher {
         if (this._port === null) { throw new Error('Invalid state'); }
         this._eventListeners.addListener(this._port.onDisconnect, this._onDisconnect.bind(this));
         this._eventListeners.addListener(this._port.onMessage, this._onMessage.bind(this));
+        if (this._pageScoped) { return; }
         this._eventListeners.addEventListener(window, 'pageshow', this._onPageShow.bind(this));
         this._eventListeners.addEventListener(document, 'resume', this._onResume.bind(this));
     }
@@ -405,7 +410,7 @@ export class CrossFrameAPI {
         if (typeof tabId !== 'number') { throw new Error('Unknown tab id'); }
         const previous = this._commPorts.get(tabId)?.get(otherFrameId);
         if (typeof previous !== 'undefined') { previous.disconnect(); }
-        this._setupCommPort(tabId, otherFrameId, createRuntimePort(messagePort));
+        this._setupCommPort(tabId, otherFrameId, createRuntimePort(messagePort), true);
     }
 
     // Private
@@ -426,7 +431,7 @@ export class CrossFrameAPI {
 
             const otherTabId = details.otherTabId;
             const otherFrameId = details.otherFrameId;
-            this._setupCommPort(otherTabId, otherFrameId, port);
+            this._setupCommPort(otherTabId, otherFrameId, port, false);
         } catch (e) {
             port.disconnect();
             log.error(e);
@@ -486,10 +491,11 @@ export class CrossFrameAPI {
      * @param {number} otherTabId
      * @param {number} otherFrameId
      * @param {chrome.runtime.Port} port
+     * @param {boolean} pageScoped
      * @returns {CrossFrameAPIPort}
      */
-    _setupCommPort(otherTabId, otherFrameId, port) {
-        const commPort = new CrossFrameAPIPort(otherTabId, otherFrameId, port, this._apiMap);
+    _setupCommPort(otherTabId, otherFrameId, port, pageScoped) {
+        const commPort = new CrossFrameAPIPort(otherTabId, otherFrameId, port, this._apiMap, pageScoped);
         let tabPorts = this._commPorts.get(otherTabId);
         if (typeof tabPorts === 'undefined') {
             tabPorts = new Map();
