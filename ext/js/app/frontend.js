@@ -175,6 +175,7 @@ export class Frontend {
         window.addEventListener('resize', this._onResize.bind(this), false);
         if (this._browser === 'safari') {
             window.addEventListener('touchend', this._onTouchEnd.bind(this), {capture: true, passive: true});
+            window.addEventListener('message', this._onWindowMessage.bind(this), false);
         }
         addFullscreenChangeEventListener(this._updatePopup.bind(this));
 
@@ -349,6 +350,22 @@ export class Frontend {
     _onTouchEnd() {
         if (this._popup !== null) {
             this._popup.unlockAudio();
+        }
+    }
+
+    /**
+     * Unlocks the audio of a popup in this frame for a gesture in a frame it contains, such as a popup whose nested
+     * popup is in this frame, which `PopupProxy.unlockAudio` sends while the gesture is handled. Any page could send
+     * this, but it only lets the popup play audio.
+     * @param {MessageEvent<unknown>} event
+     */
+    _onWindowMessage({data}) {
+        if (typeof data !== 'object' || data === null) { return; }
+        const {action, params} = /** @type {{action?: unknown, params?: unknown}} */ (data);
+        if (action !== 'frontendUnlockAudio' || typeof params !== 'object' || params === null) { return; }
+        const {id} = /** @type {{id?: unknown}} */ (params);
+        if (typeof id === 'string') {
+            this._popupFactory.unlockAudio(id);
         }
     }
 
