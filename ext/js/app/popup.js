@@ -68,8 +68,9 @@ export class Popup extends EventDispatcher {
         this._optionsContext = null;
         /** @type {number} */
         this._contentScale = 1;
+        // Parsed, as Safari gives extension URLs in upper case and origins in lower case
         /** @type {string} */
-        this._targetOrigin = chrome.runtime.getURL('/').replace(/\/$/, '');
+        this._targetOrigin = new URL(chrome.runtime.getURL('/')).origin;
         /** @type {?import('core').Timeout} */
         this._hidePopupTimer = null;
 

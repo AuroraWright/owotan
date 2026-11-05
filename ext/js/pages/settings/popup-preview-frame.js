@@ -57,7 +57,7 @@ export class PopupPreviewFrame {
         /** @type {EventListenerCollection} */
         this._exampleTextInputEvents = new EventListenerCollection();
         /** @type {string} */
-        this._targetOrigin = chrome.runtime.getURL('/').replace(/\/$/, '');
+        this._targetOrigin = new URL(chrome.runtime.getURL('/')).origin;
         /** @type {import('language').LanguageSummary[]} */
         this._languageSummaries = [];
         /** @type {ThemeController} */
