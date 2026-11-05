@@ -1271,7 +1271,6 @@ button.icon-button>.icon-button-inner {
     display: flex;
     flex-flow: column nowrap;
     align-items: stretch;
-    white-space: nowrap;
 }
 button.popup-menu-item {
     --button-content-color: var(--text-color);
