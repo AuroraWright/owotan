@@ -148,6 +148,11 @@ function addBuildSetting(infoPlistPath, setting) {
 addBuildSetting('macOS (App)/Info.plist', 'ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;');
 addBuildSetting('iOS (App)/Info.plist', `CODE_SIGN_ENTITLEMENTS = "${iosEntitlementsName}";`);
 addBuildSetting('iOS (Extension)/Info.plist', `CODE_SIGN_ENTITLEMENTS = "${iosEntitlementsName}";`);
+const iosDeploymentTargetPattern = /IPHONEOS_DEPLOYMENT_TARGET = [\d.]+;/g;
+if ([...projectFile.matchAll(iosDeploymentTargetPattern)].length === 0) {
+    throw new Error('The Xcode project sets no iOS deployment target');
+}
+projectFile = projectFile.replace(iosDeploymentTargetPattern, 'IPHONEOS_DEPLOYMENT_TARGET = 18.0;');
 // Automatic signing registers the group, and adds it to the profiles, only for the targets that have it as a capability.
 for (const targetName of [`${appName} (iOS)`, `${appName} Extension (iOS)`]) {
     const target = new RegExp(`(\\w+) /\\* ${targetName.replace(/[()]/g, '\\$&')} \\*/ = \\{\\s*isa = PBXNativeTarget;`).exec(projectFile);
