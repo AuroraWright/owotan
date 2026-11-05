@@ -587,6 +587,9 @@ export class SearchDisplayController {
      * @returns {boolean}
      */
     _canEnableClipboardMonitor() {
+        // The clipboard can't be monitored on mobile
+        const platform = this._display.platform;
+        if (platform === 'ios' || platform === 'android') { return false; }
         switch (this._searchPersistentStateController.mode) {
             case 'action-popup':
                 return false;

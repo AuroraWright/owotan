@@ -230,6 +230,11 @@ h1 {
 :root[data-search-mode=action-popup] #search-option-clipboard-monitor-container {
     display: none;
 }
+/* The clipboard can't be monitored on mobile, where pasting into the search box does the same */
+:root[data-platform=ios] #search-option-clipboard-monitor-container,
+:root[data-platform=android] #search-option-clipboard-monitor-container {
+    display: none;
+}
 :root[data-search-mode=action-popup],
 :root[data-search-mode=action-popup] body {
     width: 640px;
