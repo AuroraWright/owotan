@@ -190,6 +190,9 @@
     font-size: var(--font-size);
     line-height: var(--line-height);
     height: 100%;
+    /* iOS enlarges text in blocks that hold more of it, such as long menu items */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 body {
     margin: 0;
