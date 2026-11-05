@@ -1260,6 +1260,9 @@ button.icon-button>.icon-button-inner {
     padding: 0.5em 0;
     min-width: 8em;
     overflow: auto;
+    /* A long press opens some menus, and Safari on iOS would otherwise go on to select the text under the touch. */
+    user-select: none;
+    -webkit-user-select: none;
 }
 .popup-menu-body {
     display: flex;

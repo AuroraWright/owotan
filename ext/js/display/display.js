@@ -32,6 +32,7 @@ import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {ScrollElement} from '../dom/scroll-element.js';
 import {TextSourceGenerator} from '../dom/text-source-generator.js';
+import {TouchContextMenu} from '../dom/touch-context-menu.js';
 import {adaptCssForWebKit} from '../dom/webkit-css-util.js';
 import {HotkeyHelpController} from '../input/hotkey-help-controller.js';
 import {TextScanner} from '../language/text-scanner.js';
@@ -357,6 +358,9 @@ export class Display extends EventDispatcher {
         }
 
         document.addEventListener('wheel', this._onWheel.bind(this), {passive: false});
+        if (this._platform === 'ios') {
+            new TouchContextMenu(document).prepare();
+        }
         if (this._contentScrollElement !== null) {
             this._contentScrollElement.addEventListener('touchstart', this._onTouchStart.bind(this), {passive: true});
             this._contentScrollElement.addEventListener('touchmove', this._onTouchMove.bind(this), {passive: false});

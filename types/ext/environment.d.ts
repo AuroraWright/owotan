@@ -22,4 +22,5 @@ export type Info = {
 
 export type Browser = 'chrome' | 'firefox' | 'firefox-mobile' | 'edge' | 'edge-legacy' | 'safari';
 
-export type OperatingSystem = `${chrome.runtime.PlatformOs}` | 'unknown';
+/** Safari on iOS and iPadOS reports `ios`, which Chrome does not have. */
+export type OperatingSystem = `${chrome.runtime.PlatformOs}` | 'ios' | 'unknown';

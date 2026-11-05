@@ -643,6 +643,9 @@ button.sidebar-button.sidebar-button-highlight {
     margin: -0.25em;
     position: relative;
     z-index: 1;
+    /* A long press opens the menus of some buttons, and Safari on iOS would otherwise go on to select text. */
+    user-select: none;
+    -webkit-user-select: none;
 }
 .actions::after {
     clear: both;
