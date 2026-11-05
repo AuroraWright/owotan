@@ -463,7 +463,8 @@
                                                         "text-to-speech",
                                                         "text-to-speech-reading",
                                                         "custom",
-                                                        "custom-json"
+                                                        "custom-json",
+                                                        "local-android-db"
                                                     ],
                                                     "default": "jpod101"
                                                 },

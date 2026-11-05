@@ -27,6 +27,15 @@ export type GetInfoHandler = (
 
 export type Info = Info1 | Info2;
 
+/** A row of the entries table of android.db, which the Local Audio Server for Yomichan add-on for Anki creates. */
+export type LocalAudioEntry = {
+    expression: string;
+    reading: string | null;
+    source: string;
+    display: string | null;
+    file: string;
+};
+
 export type Info1 = {
     type: 'url';
     url: string;

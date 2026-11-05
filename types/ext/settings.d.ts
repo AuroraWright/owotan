@@ -427,7 +427,7 @@ export type PopupWindowType = 'normal' | 'popup';
 
 export type PopupWindowState = 'normal' | 'maximized' | 'fullscreen';
 
-export type AudioSourceType = 'jpod101' | 'language-pod-101' | 'jisho' | 'lingua-libre' | 'wiktionary' | 'text-to-speech' | 'text-to-speech-reading' | 'custom' | 'custom-json';
+export type AudioSourceType = 'jpod101' | 'language-pod-101' | 'jisho' | 'lingua-libre' | 'wiktionary' | 'text-to-speech' | 'text-to-speech-reading' | 'custom' | 'custom-json' | 'local-android-db';
 
 export type TranslationConvertType = 'false' | 'true' | 'variant';
 

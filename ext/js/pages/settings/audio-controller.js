@@ -49,6 +49,8 @@ export class AudioController extends EventDispatcher {
         this._voices = [];
         /** @type {string} */
         this._language = 'ja';
+        /** @type {boolean} */
+        this._localAndroidDbSupported = false;
     }
 
     /** @type {import('./settings-controller.js').SettingsController} */
@@ -64,6 +66,14 @@ export class AudioController extends EventDispatcher {
     /** @type {number} */
     get audioSourceCount() {
         return this._audioSourceEntries.length;
+    }
+
+    /**
+     * Whether audio can be played from android.db, which only the app that holds the extension on iOS can read.
+     * @type {boolean}
+     */
+    get localAndroidDbSupported() {
+        return this._localAndroidDbSupported;
     }
 
     /** */
@@ -85,6 +95,9 @@ export class AudioController extends EventDispatcher {
         this._updateTextToSpeechVoices();
 
         testButton.addEventListener('click', this._onTestTextToSpeech.bind(this), false);
+
+        const {platform} = await this._settingsController.application.api.getEnvironmentInfo();
+        this._localAndroidDbSupported = (platform.os === 'ios');
 
         this._settingsController.on('optionsChanged', this._onOptionsChanged.bind(this));
 
@@ -371,6 +384,11 @@ class AudioSourceEntry {
     prepare() {
         this._updateTypeParameter();
 
+        if (!this._parent.localAndroidDbSupported && this._type !== 'local-android-db') {
+            const option = this._typeSelect.querySelector('option[value=local-android-db]');
+            if (option !== null) { option.remove(); }
+        }
+
         /** @type {HTMLButtonElement} */
         const menuButton = querySelectorNotNull(this._node, '.audio-source-menu-button');
 
@@ -465,6 +483,7 @@ class AudioSourceEntry {
         switch (this._type) {
             case 'custom':
             case 'custom-json':
+            case 'local-android-db':
             case 'text-to-speech':
             case 'text-to-speech-reading':
                 hasHelp = true;
@@ -549,6 +568,9 @@ class AudioSourceEntry {
             case 'custom-json':
                 this._showModal('audio-source-help-custom-json');
                 break;
+            case 'local-android-db':
+                this._showModal('audio-source-help-local-android-db');
+                break;
             case 'text-to-speech':
             case 'text-to-speech-reading':
                 this._parent.setTestVoice(this._voice);
@@ -596,6 +618,7 @@ class AudioSourceEntry {
             case 'text-to-speech-reading':
             case 'custom':
             case 'custom-json':
+            case 'local-android-db':
                 return value;
             default:
                 return null;

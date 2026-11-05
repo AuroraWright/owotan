@@ -69,6 +69,7 @@ export class DisplayAudio {
             ['text-to-speech-reading', 'Text-to-speech (Kana reading)'],
             ['custom', 'Custom URL'],
             ['custom-json', 'Custom URL (JSON)'],
+            ['local-android-db', 'Local android.db'],
         ]);
         /** @type {?boolean} */
         this._enableDefaultAudioSources = null;

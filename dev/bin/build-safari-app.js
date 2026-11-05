@@ -110,13 +110,55 @@ run('xcrun', ['safari-web-extension-converter', '--project-location', appDirecto
 fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'SafariWebExtensionHandler.swift'), path.join(appDirectory, appName, 'Shared (Extension)', 'SafariWebExtensionHandler.swift'));
 // The macOS app serves the Yomitan API (AppDelegate.swift), for which its sandbox has to let it accept connections.
 fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'AppDelegate.swift'), path.join(appDirectory, appName, 'macOS (App)', 'AppDelegate.swift'));
-const projectFilePath = path.join(appDirectory, appName, `${appName}.xcodeproj`, 'project.pbxproj');
-const macAppSettingsPattern = /(buildSettings = \{[^}]*?)(INFOPLIST_FILE = "macOS \(App\)\/Info\.plist";)/g;
-const projectFile = fs.readFileSync(projectFilePath, {encoding: 'utf8'});
-if ([...projectFile.matchAll(macAppSettingsPattern)].length === 0) {
-    throw new Error('The macOS app target was not found in the Xcode project');
+// The iOS app copies android.db, which the user puts in its folder in the Files app, to storage that it shares with
+// the app extension, which reads audio from it (SceneDelegate.swift).
+fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'SceneDelegate.swift'), path.join(appDirectory, appName, 'iOS (App)', 'SceneDelegate.swift'));
+const iosAppInfoPath = path.join(appDirectory, appName, 'iOS (App)', 'Info.plist');
+for (const key of ['UIFileSharingEnabled', 'LSSupportsOpeningDocumentsInPlace']) {
+    run('plutil', ['-replace', key, '-bool', 'YES', iosAppInfoPath]);
 }
-fs.writeFileSync(projectFilePath, projectFile.replace(macAppSettingsPattern, '$1ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;\n\t\t\t\t$2'));
+const iosEntitlementsName = `${appName} (iOS).entitlements`;
+fs.writeFileSync(path.join(appDirectory, appName, iosEntitlementsName), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.${args['bundle-id']}</string>
+    </array>
+</dict>
+</plist>
+`);
+
+const projectFilePath = path.join(appDirectory, appName, `${appName}.xcodeproj`, 'project.pbxproj');
+let projectFile = fs.readFileSync(projectFilePath, {encoding: 'utf8'});
+/**
+ * Adds a build setting to the configurations of the target whose Info.plist is at a path.
+ * @param {string} infoPlistPath
+ * @param {string} setting
+ * @throws {Error} If the project has no such target.
+ */
+function addBuildSetting(infoPlistPath, setting) {
+    const pattern = new RegExp(`(buildSettings = \\{[^}]*?)(INFOPLIST_FILE = "${infoPlistPath.replace(/[()./]/g, '\\$&')}";)`, 'g');
+    if ([...projectFile.matchAll(pattern)].length === 0) {
+        throw new Error(`The target of ${infoPlistPath} was not found in the Xcode project`);
+    }
+    projectFile = projectFile.replace(pattern, `$1${setting}\n\t\t\t\t$2`);
+}
+addBuildSetting('macOS (App)/Info.plist', 'ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;');
+addBuildSetting('iOS (App)/Info.plist', `CODE_SIGN_ENTITLEMENTS = "${iosEntitlementsName}";`);
+addBuildSetting('iOS (Extension)/Info.plist', `CODE_SIGN_ENTITLEMENTS = "${iosEntitlementsName}";`);
+// Automatic signing registers the group, and adds it to the profiles, only for the targets that have it as a capability.
+for (const targetName of [`${appName} (iOS)`, `${appName} Extension (iOS)`]) {
+    const target = new RegExp(`(\\w+) /\\* ${targetName.replace(/[()]/g, '\\$&')} \\*/ = \\{\\s*isa = PBXNativeTarget;`).exec(projectFile);
+    const attributes = target !== null ? new RegExp(`(\\t+)${target[1]} = \\{\\n`).exec(projectFile) : null;
+    if (target === null || attributes === null) {
+        throw new Error(`The target ${targetName} was not found in the Xcode project`);
+    }
+    const indent = `${attributes[1]}\t`;
+    projectFile = projectFile.replace(attributes[0], `${attributes[0]}${indent}SystemCapabilities = {\n${indent}\tcom.apple.ApplicationGroups.iOS = {\n${indent}\t\tenabled = 1;\n${indent}\t};\n${indent}};\n`);
+}
+fs.writeFileSync(projectFilePath, projectFile);
 if (args['project-only']) {
     process.exit(0);
 }

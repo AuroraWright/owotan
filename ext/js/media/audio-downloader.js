@@ -24,7 +24,7 @@ import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {JsonSchema} from '../data/json-schema.js';
 import {NativeSimpleDOMParser} from '../dom/native-simple-dom-parser.js';
 import {SimpleDOMParser} from '../dom/simple-dom-parser.js';
-import {isStringEntirelyKana} from '../language/ja/japanese.js';
+import {convertKatakanaToHiragana, isStringEntirelyKana} from '../language/ja/japanese.js';
 
 /** @type {RequestInit} */
 const DEFAULT_REQUEST_INIT_PARAMS = {
@@ -35,6 +35,37 @@ const DEFAULT_REQUEST_INIT_PARAMS = {
     redirect: 'follow',
     referrerPolicy: 'no-referrer',
 };
+
+/**
+ * The sources of the Local Audio Server for Yomichan add-on for Anki, in the order its default settings list them, with
+ * their names, in which `%s` stands for an entry's display text.
+ */
+const LOCAL_AUDIO_SOURCE_NAMES = new Map([
+    ['nhk16', 'NHK16 %s'],
+    ['shinmeikai8', 'SMK8 %s'],
+    ['daijisen', 'Daijisen %s'],
+    ['taas', 'TAAS'],
+    ['forvo', 'Forvo (%s)'],
+    ['forvo_ext', 'Forvo Ext'],
+    ['forvo_ext2', 'Forvo Ext2'],
+    ['jpod', 'Jpod101'],
+    ['jpod_alternate', 'JPod101 Alt'],
+    ['ozk5', 'OZK5'],
+]);
+
+/** The start of the URLs of audio in android.db, which are followed by the audio's source and file. */
+const LOCAL_ANDROID_DB_URL_PREFIX = 'local-android-db:';
+
+/** The types of the audio files in android.db, as the add-on serves them. */
+const LOCAL_AUDIO_MIME_TYPES = new Map([
+    ['.mp3', 'audio/mpeg'],
+    ['.aac', 'audio/aac'],
+    ['.m4a', 'audio/mp4'],
+    ['.ogg', 'audio/ogg'],
+    ['.oga', 'audio/ogg'],
+    ['.opus', 'audio/ogg'],
+    ['.flac', 'audio/flac'],
+]);
 
 export class AudioDownloader {
     /**
@@ -56,6 +87,7 @@ export class AudioDownloader {
             ['text-to-speech-reading', this._getInfoTextToSpeechReading.bind(this)],
             ['custom', this._getInfoCustom.bind(this)],
             ['custom-json', this._getInfoCustomJson.bind(this)],
+            ['local-android-db', this._getInfoLocalAndroidDb.bind(this)],
         ]));
         /** @type {Intl.DisplayNames} */
         this._regionNames = new Intl.DisplayNames(['en'], {type: 'region'});
@@ -517,6 +549,10 @@ export class AudioDownloader {
      * @returns {Promise<import('audio-downloader').AudioBinaryBase64>}
      */
     async _downloadAudioFromUrl(url, sourceType, idleTimeout) {
+        if (sourceType === 'local-android-db') {
+            return await this._downloadLocalAndroidDbAudio(url);
+        }
+
         let signal;
         /** @type {?import('request-builder.js').ProgressCallback} */
         let onProgress = null;
@@ -559,6 +595,89 @@ export class AudioDownloader {
         const data = arrayBufferToBase64(arrayBuffer);
         const contentType = response.headers.get('Content-Type');
         return {data, contentType};
+    }
+
+    /**
+     * Lists audio in android.db, as the Local Audio Server for Yomichan add-on for Anki does: matching the term
+     * and the reading first, then the term, then the reading, each in the order of the add-on's sources. Without a
+     * reading, only the term is matched.
+     * @type {import('audio-downloader').GetInfoHandler}
+     */
+    async _getInfoLocalAndroidDb(term, reading) {
+        reading = convertKatakanaToHiragana(reading);
+        const {entries} = await this._sendLocalAudioMessage({action: 'getLocalAudioEntries', term, reading});
+        if (!Array.isArray(entries)) {
+            throw new Error('Invalid response');
+        }
+        const sourceIds = [...LOCAL_AUDIO_SOURCE_NAMES.keys()];
+        /**
+         * @param {import('audio-downloader').LocalAudioEntry} entry
+         * @returns {number}
+         */
+        const getMatchType = ({expression, reading: entryReading}) => {
+            if (expression === term) { return entryReading === reading ? 0 : 1; }
+            return entryReading === reading ? 2 : 3;
+        };
+        /**
+         * @param {import('audio-downloader').LocalAudioEntry} entry
+         * @returns {number}
+         */
+        const getSourceOrder = ({source}) => {
+            const index = sourceIds.indexOf(source);
+            return index >= 0 ? index : sourceIds.length;
+        };
+        const matchTypeNames = reading.length > 0 ? [' (Expression+Reading)', ' (Only Expression)', ' (Only Reading)', ''] : ['', '', '', ''];
+        return (/** @type {import('audio-downloader').LocalAudioEntry[]} */ (entries))
+            .sort((entry1, entry2) => (getMatchType(entry1) - getMatchType(entry2)) || (getSourceOrder(entry1) - getSourceOrder(entry2)))
+            .map((entry) => {
+                const {source, display, file} = entry;
+                const format = LOCAL_AUDIO_SOURCE_NAMES.get(source) ?? source;
+                const name = (display !== null ? format.replace('%s', display) : format.replace(/\s*\(?%s\)?/, '')) + matchTypeNames[getMatchType(entry)];
+                return {type: 'url', url: `${LOCAL_ANDROID_DB_URL_PREFIX}${source}/${file}`, name};
+            });
+    }
+
+    /**
+     * @param {string} url A URL that `_getInfoLocalAndroidDb` gave.
+     * @returns {Promise<import('audio-downloader').AudioBinaryBase64>}
+     */
+    async _downloadLocalAndroidDbAudio(url) {
+        const path = url.startsWith(LOCAL_ANDROID_DB_URL_PREFIX) ? url.substring(LOCAL_ANDROID_DB_URL_PREFIX.length) : '';
+        const slash = path.indexOf('/');
+        if (slash < 0) {
+            throw new Error('Invalid URL');
+        }
+        const file = path.substring(slash + 1);
+        const {data} = await this._sendLocalAudioMessage({action: 'getLocalAudio', source: path.substring(0, slash), file});
+        if (typeof data !== 'string') {
+            throw new Error('Invalid response');
+        }
+        const extension = /\.[^./]*$/.exec(file);
+        const contentType = (extension !== null ? LOCAL_AUDIO_MIME_TYPES.get(extension[0].toLowerCase()) : void 0) ?? 'audio/mpeg';
+        return {data, contentType};
+    }
+
+    /**
+     * On iOS, the app extension that holds this one reads android.db, which the app keeps where it can.
+     * @param {{[key: string]: string}} message
+     * @returns {Promise<{[key: string]: unknown}>}
+     */
+    _sendLocalAudioMessage(message) {
+        return new Promise((resolve, reject) => {
+            // Safari sends native messages to the app extension whichever application is named.
+            chrome.runtime.sendNativeMessage('application.id', message, (/** @type {unknown} */ response) => {
+                const error = chrome.runtime.lastError;
+                if (error) {
+                    reject(new Error(`Cannot read android.db: ${error.message}`));
+                } else if (typeof response !== 'object' || response === null) {
+                    reject(new Error('Cannot read android.db'));
+                } else if ('error' in response) {
+                    reject(new Error(String(response.error)));
+                } else {
+                    resolve(/** @type {{[key: string]: unknown}} */ (response));
+                }
+            });
+        });
     }
 
     /**

@@ -17,13 +17,15 @@
 
 // Answers browser.runtime.sendNativeMessage from the extension. Safari does not let an extension read the
 // clipboard, so the extension asks the app extension, which can. On macOS it also starts the app, which serves
-// the Yomitan API (AppDelegate.swift), when the extension needs it.
+// the Yomitan API (AppDelegate.swift), when the extension needs it. On iOS it reads audio from android.db, which
+// the app keeps where the app extension can read it (SceneDelegate.swift).
 // dev/bin/build-safari-app.js puts this file in place of the one Xcode's converter generates.
 
 import SafariServices
 #if os(macOS)
 import AppKit
 #else
+import SQLite3
 import UIKit
 #endif
 
@@ -56,6 +58,11 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         #if os(macOS)
         case "startApiServer":
             response = Self.startApiServer(port: message?["port"] as? Int ?? 19633)
+        #else
+        case "getLocalAudioEntries":
+            response = LocalAudioDatabase.entries(term: message?["term"] as? String ?? "", reading: message?["reading"] as? String ?? "")
+        case "getLocalAudio":
+            response = LocalAudioDatabase.audio(source: message?["source"] as? String ?? "", file: message?["file"] as? String ?? "")
         #endif
         default:
             response = ["error": "Unsupported message"]
@@ -151,3 +158,102 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         return value
     }
 }
+
+#if os(iOS)
+/// Reads android.db, which the Local Audio Server for Yomichan add-on for Anki creates. It holds the add-on's table
+/// of entries, and the audio files in a table named android. The app keeps a copy of the one that the user puts in
+/// its folder in the Files app in the storage that it shares with this app extension (SceneDelegate.swift).
+enum LocalAudioDatabase {
+    static let fileName = "android.db"
+
+    private static let lock = NSLock()
+    /// The open database, with the file it was opened from, which the app replaces rather than changes.
+    private static var connection: (fileNumber: Int, database: OpaquePointer)?
+
+    /// The entries whose expression is the term or whose reading is the reading, if there is one.
+    static func entries(term: String, reading: String) -> [String: Any] {
+        query("SELECT expression, reading, source, display, file FROM entries WHERE expression = ?1 OR (?2 <> '' AND reading = ?2)", [term, reading]) { statement in
+            var entries: [[String: Any]] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                entries.append([
+                    "expression": text(statement, 0) ?? "",
+                    "reading": text(statement, 1) ?? NSNull(),
+                    "source": text(statement, 2) ?? "",
+                    "display": text(statement, 3) ?? NSNull(),
+                    "file": text(statement, 4) ?? "",
+                ])
+            }
+            return ["entries": entries]
+        }
+    }
+
+    /// The audio file of a source, encoded with base64.
+    static func audio(source: String, file: String) -> [String: Any] {
+        query("SELECT data FROM android WHERE file = ?1 AND source = ?2", [file, source]) { statement in
+            guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_blob(statement, 0) else {
+                return ["error": "The audio was not found in \(fileName)"]
+            }
+            let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0)))
+            return ["data": data.base64EncodedString()]
+        }
+    }
+
+    /// The storage that the app shares with this app extension. Its group's identifier is the app's, with
+    /// "group." before it, and this app extension's identifier is the app's followed by its own name.
+    static func sharedDirectory() -> URL? {
+        guard let extensionIdentifier = Bundle.main.bundleIdentifier, let dot = extensionIdentifier.lastIndex(of: ".") else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.\(extensionIdentifier[..<dot])")
+    }
+
+    private static func query(_ sql: String, _ parameters: [String], _ read: (OpaquePointer) -> [String: Any]) -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let database = open() else {
+            return ["error": "\(fileName) was not found. Copy it to On My iPhone › Yomitan in the Files app, then open the Yomitan app."]
+        }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            return ["error": String(cString: sqlite3_errmsg(database))]
+        }
+        defer { sqlite3_finalize(statement) }
+        // SQLITE_TRANSIENT, which Swift does not import: SQLite copies the text.
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for (index, parameter) in parameters.enumerated() {
+            sqlite3_bind_text(statement, Int32(index + 1), parameter, -1, transient)
+        }
+        return read(statement)
+    }
+
+    /// Opens the database, again once the app has replaced it.
+    private static func open() -> OpaquePointer? {
+        guard let url = sharedDirectory()?.appendingPathComponent(fileName),
+              let fileNumber = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.systemFileNumber] as? Int else {
+            close()
+            return nil
+        }
+        if let connection, connection.fileNumber == fileNumber {
+            return connection.database
+        }
+        close()
+        // Immutable, as the app replaces the file instead of writing to it, so SQLite neither locks nor journals it.
+        var database: OpaquePointer?
+        guard sqlite3_open_v2("\(url.absoluteString)?immutable=1", &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK, let database else {
+            sqlite3_close(database)
+            return nil
+        }
+        connection = (fileNumber, database)
+        return database
+    }
+
+    private static func close() {
+        if let connection {
+            sqlite3_close(connection.database)
+        }
+        connection = nil
+    }
+
+    private static func text(_ statement: OpaquePointer, _ column: Int32) -> String? {
+        sqlite3_column_text(statement, column).map { String(cString: $0) }
+    }
+}
+#endif
