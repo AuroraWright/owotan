@@ -18,7 +18,7 @@
 
 import {describe, expect, test} from 'vitest';
 import {DynamicProperty} from '../ext/js/core/dynamic-property.js';
-import {deepEqual} from '../ext/js/core/utilities.js';
+import {deepEqual, isLocalNetworkUrl} from '../ext/js/core/utilities.js';
 
 describe('DynamicProperty', () => {
     /** @type {import('test/core').DynamicPropertyTestData} */
@@ -315,5 +315,30 @@ describe('deepEqual', () => {
             const actual2 = deepEqual(value2, value1);
             expect(actual2).toStrictEqual(expected);
         });
+    });
+});
+
+describe('isLocalNetworkUrl', () => {
+    test.each([
+        ['http://localhost:5050/audio.mp3', true],
+        ['http://127.0.0.1:5050/?term=a', true],
+        ['http://[::1]:5050/', true],
+        ['http://10.0.0.2/', true],
+        ['http://172.16.0.1/', true],
+        ['http://172.31.255.255/', true],
+        ['http://192.168.50.2:5050/?term={term}&reading={reading}', true],
+        ['https://169.254.1.1/', true],
+        ['http://[fd12:3456::1]/', true],
+        ['http://[fe80::1]/', true],
+        ['http://anki.local:5050/', true],
+        ['http://172.32.0.1/', false],
+        ['http://192.169.0.1/', false],
+        ['https://8.8.8.8/', false],
+        ['http://[2001:db8::1]/', false],
+        ['https://example.com/audio.mp3', false],
+        ['ftp://192.168.1.1/', false],
+        ['not a url', false],
+    ])('isLocalNetworkUrl(%s) -> %s', (url, expected) => {
+        expect(isLocalNetworkUrl(url)).toStrictEqual(expected);
     });
 });

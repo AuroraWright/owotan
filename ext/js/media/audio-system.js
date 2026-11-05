@@ -18,9 +18,8 @@
 
 import {API} from '../comm/api.js';
 import {EventDispatcher} from '../core/event-dispatcher.js';
-import {isLocalhostUrl} from '../core/utilities.js';
+import {isLocalNetworkUrl} from '../core/utilities.js';
 import {TextToSpeechAudio} from './text-to-speech-audio.js';
-import {WebAudioLocalAudio} from './web-audio-local-audio.js';
 
 /**
  * @augments EventDispatcher<import('audio-system').Events>
@@ -78,10 +77,13 @@ export class AudioSystem extends EventDispatcher {
     /**
      * @param {string} url
      * @param {import('settings').AudioSourceType} sourceType
-     * @returns {Promise<HTMLAudioElement|WebAudioLocalAudio>}
+     * @returns {Promise<HTMLAudioElement>}
      */
     async createAudio(url, sourceType) {
-        if (isLocalhostUrl(url) && this._api) {
+        // Audio on this device or its local network is downloaded by the background page and played from its data.
+        // Chrome asks for local network access for an audio element's request, and on iOS an audio element plays
+        // nothing from the local network, while requests from the background page reach it in both.
+        if (isLocalNetworkUrl(url) && this._api) {
             /** @type {{data: string, contentType: string}|null} */
             const response = await this._api.fetchLocalAudioData(url);
 
@@ -89,9 +91,7 @@ export class AudioSystem extends EventDispatcher {
                 throw new Error('Failed to fetch local audio from background context');
             }
 
-            const localAudio = new WebAudioLocalAudio(response.data, response.contentType || 'audio/mpeg');
-            await localAudio.prepare();
-            return localAudio;
+            url = `data:${response.contentType || 'audio/mpeg'};base64,${response.data}`;
         }
 
         const audio = new Audio(url);

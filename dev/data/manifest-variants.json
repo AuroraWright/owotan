@@ -124,7 +124,7 @@
             "value": "same-origin"
         },
         "content_security_policy": {
-            "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src blob: 'self'; style-src 'self' 'unsafe-inline'; media-src *; connect-src *",
+            "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src blob: 'self'; style-src 'self' 'unsafe-inline'; media-src * data:; connect-src *",
             "sandbox": "sandbox allow-scripts; default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'unsafe-inline'"
         }
     },
@@ -288,7 +288,7 @@
                         "content_security_policy",
                         "extension_pages"
                     ],
-                    "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src blob: 'self'; style-src 'self' 'unsafe-inline'; media-src *; connect-src *"
+                    "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src blob: 'self'; style-src 'self' 'unsafe-inline'; media-src * data:; connect-src *"
                 },
                 {
                     "action": "set",
