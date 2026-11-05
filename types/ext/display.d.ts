@@ -244,6 +244,10 @@ export type WindowApiSurface = {
         params: void;
         return: void;
     };
+    displayAudioUnlock: {
+        params: void;
+        return: void;
+    };
 };
 
 type WindowApiNames = BaseApiNames<WindowApiSurface>;

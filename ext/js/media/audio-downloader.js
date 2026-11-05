@@ -501,6 +501,16 @@ export class AudioDownloader {
     }
 
     /**
+     * Downloads the audio at a URL from an audio source, checking that it is valid audio from that source.
+     * @param {string} url
+     * @param {import('settings').AudioSourceType} sourceType
+     * @returns {Promise<import('audio-downloader').AudioBinaryBase64>}
+     */
+    async downloadAudio(url, sourceType) {
+        return await this._downloadAudioFromUrl(url, sourceType, null);
+    }
+
+    /**
      * @param {string} url
      * @param {import('settings').AudioSourceType} sourceType
      * @param {?number} idleTimeout

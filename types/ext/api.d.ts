@@ -431,6 +431,13 @@ type ApiSurface = {
         };
         return: {data: string, contentType: string} | null;
     };
+    downloadAudio: {
+        params: {
+            url: string;
+            sourceType: Settings.AudioSourceType;
+        };
+        return: AudioDownloader.AudioBinaryBase64;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];

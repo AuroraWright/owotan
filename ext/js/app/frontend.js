@@ -100,6 +100,8 @@ export class Frontend {
         });
         /** @type {boolean} */
         this._textScannerHasBeenEnabled = false;
+        /** @type {?import('environment').Browser} */
+        this._browser = browser;
         /** @type {Map<'default'|'window'|'iframe'|'proxy', Promise<?import('popup').PopupAny>>} */
         this._popupCache = new Map();
         /** @type {EventListenerCollection} */
@@ -171,6 +173,9 @@ export class Frontend {
         this._textScanner.prepare();
 
         window.addEventListener('resize', this._onResize.bind(this), false);
+        if (this._browser === 'safari') {
+            window.addEventListener('touchend', this._onTouchEnd.bind(this), {capture: true, passive: true});
+        }
         addFullscreenChangeEventListener(this._updatePopup.bind(this));
 
         const {visualViewport} = window;
@@ -337,6 +342,15 @@ export class Frontend {
     }
 
     // Private
+
+    /**
+     * Lets the popup play audio, such as audio played automatically for a lookup, since the touch is a gesture.
+     */
+    _onTouchEnd() {
+        if (this._popup !== null) {
+            this._popup.unlockAudio();
+        }
+    }
 
     /**
      * @returns {void}

@@ -27,15 +27,19 @@ import {TextToSpeechAudio} from './text-to-speech-audio.js';
 export class AudioSystem extends EventDispatcher {
     /**
      * @param {API?} api
+     * @param {?import('./shared-audio-element.js').SharedAudioElement} sharedAudioElement The element to play audio
+     *   from URLs on, for iOS, which then downloads audio with the API.
      */
-    constructor(api) {
+    constructor(api, sharedAudioElement) {
         super();
-        /** @type {?HTMLAudioElement} */
+        /** @type {?(HTMLAudioElement|import('./shared-audio-element.js').SharedElementAudio)} */
         this._fallbackAudio = null;
         /** @type {?import('settings').FallbackSoundType} */
         this._fallbackSoundType = null;
         /** @type {API?} */
         this._api = api;
+        /** @type {?import('./shared-audio-element.js').SharedAudioElement} */
+        this._sharedAudioElement = sharedAudioElement;
     }
 
     /**
@@ -53,17 +57,17 @@ export class AudioSystem extends EventDispatcher {
 
     /**
      * @param {import('settings').FallbackSoundType} fallbackSoundType
-     * @returns {HTMLAudioElement}
+     * @returns {HTMLAudioElement|import('./shared-audio-element.js').SharedElementAudio}
      */
     getFallbackAudio(fallbackSoundType) {
         if (this._fallbackAudio === null || this._fallbackSoundType !== fallbackSoundType) {
             this._fallbackSoundType = fallbackSoundType;
             switch (fallbackSoundType) {
                 case 'click':
-                    this._fallbackAudio = new Audio('/data/audio/fallback-click.mp3');
+                    this._fallbackAudio = this._createAudioElement('/data/audio/fallback-click.mp3');
                     break;
                 case 'bloop':
-                    this._fallbackAudio = new Audio('/data/audio/fallback-bloop.mp3');
+                    this._fallbackAudio = this._createAudioElement('/data/audio/fallback-bloop.mp3');
                     break;
                 case 'none':
                     // audio handler expects audio url to always be present, empty string must be used instead of `new Audio()`
@@ -77,9 +81,15 @@ export class AudioSystem extends EventDispatcher {
     /**
      * @param {string} url
      * @param {import('settings').AudioSourceType} sourceType
-     * @returns {Promise<HTMLAudioElement>}
+     * @returns {Promise<HTMLAudioElement|import('./shared-audio-element.js').SharedElementAudio>}
      */
     async createAudio(url, sourceType) {
+        if (this._sharedAudioElement !== null && this._api !== null) {
+            // The shared element cannot load audio before it plays, so the audio is downloaded and checked here.
+            const {data, contentType} = await this._api.downloadAudio(url, sourceType);
+            return this._sharedAudioElement.createAudio(`data:${contentType ?? 'audio/mpeg'};base64,${data}`);
+        }
+
         // Audio on this device or its local network is downloaded by the background page and played from its data.
         // Chrome asks for local network access for an audio element's request, and on iOS an audio element plays
         // nothing from the local network, while requests from the background page reach it in both.
@@ -117,6 +127,14 @@ export class AudioSystem extends EventDispatcher {
     }
 
     // Private
+
+    /**
+     * @param {string} url
+     * @returns {HTMLAudioElement|import('./shared-audio-element.js').SharedElementAudio}
+     */
+    _createAudioElement(url) {
+        return this._sharedAudioElement !== null ? this._sharedAudioElement.createAudio(url) : new Audio(url);
+    }
 
     /**
      * @param {Event} event

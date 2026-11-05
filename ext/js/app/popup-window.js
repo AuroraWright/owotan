@@ -211,6 +211,14 @@ export class PopupWindow extends EventDispatcher {
     }
 
     /**
+     * Lets the popup play audio later without a gesture of its own. A popup window gets gestures of its own, so this
+     * does nothing.
+     */
+    unlockAudio() {
+        // NOP
+    }
+
+    /**
      * Returns whether or not the popup is currently visible, synchronously.
      * @throws An exception is thrown for `PopupWindow` since it cannot synchronously detect visibility.
      */

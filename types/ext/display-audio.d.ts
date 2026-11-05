@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import type {SharedElementAudio} from '../../ext/js/media/shared-audio-element';
 import type {TextToSpeechAudio} from '../../ext/js/media/text-to-speech-audio';
 import type * as Audio from './audio';
 import type * as AudioDownloader from './audio-downloader';
@@ -92,7 +93,7 @@ export type CreateAudioResult = {
     cacheUpdated: boolean;
 };
 
-export type GenericAudio = HTMLAudioElement | TextToSpeechAudio;
+export type GenericAudio = HTMLAudioElement | TextToSpeechAudio | SharedElementAudio;
 
 export type MenuItemEntry = {
     valid: boolean | null;

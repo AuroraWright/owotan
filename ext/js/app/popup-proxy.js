@@ -242,6 +242,14 @@ export class PopupProxy extends EventDispatcher {
     }
 
     /**
+     * Lets the popup play audio later without a gesture of its own. A gesture in this frame does not carry over to the
+     * popup in another frame, so this does nothing.
+     */
+    unlockAudio() {
+        // NOP
+    }
+
+    /**
      * Returns whether or not the popup is currently visible, synchronously.
      * @throws An exception is thrown for `PopupProxy` since it cannot synchronously detect visibility.
      */

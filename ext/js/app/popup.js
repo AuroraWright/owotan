@@ -381,6 +381,14 @@ export class Popup extends EventDispatcher {
     }
 
     /**
+     * Lets the popup play audio later without a gesture of its own, when called while a gesture is handled. Safari on
+     * iOS plays audio only after a gesture has started it, and the message sent to the frame here carries the gesture.
+     */
+    unlockAudio() {
+        this._invokeWindow('displayAudioUnlock', void 0);
+    }
+
+    /**
      * Returns whether or not the popup is currently visible, synchronously.
      * @returns {boolean} `true` if the popup is visible, `false` otherwise.
      */

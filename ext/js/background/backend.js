@@ -198,6 +198,7 @@ export class Backend {
             ['heartbeat',                    this._onApiHeartbeat.bind(this)],
             ['forceSync',                    this._onApiForceSync.bind(this)],
             ['fetchLocalAudioData',          this._onApiFetchLocalAudioData.bind(this)],
+            ['downloadAudio',                this._onApiDownloadAudio.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1253,6 +1254,11 @@ export class Backend {
             data: btoa(binary),
             contentType: contentType,
         };
+    }
+
+    /** @type {import('api').ApiHandler<'downloadAudio'>} */
+    async _onApiDownloadAudio({url, sourceType}) {
+        return await this._audioDownloader.downloadAudio(url, sourceType);
     }
 
     // Command handlers

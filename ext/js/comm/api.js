@@ -466,6 +466,15 @@ export class API {
         return this._invoke('fetchLocalAudioData', {url});
     }
 
+    /**
+     * @param {import('api').ApiParam<'downloadAudio', 'url'>} url
+     * @param {import('api').ApiParam<'downloadAudio', 'sourceType'>} sourceType
+     * @returns {Promise<import('api').ApiReturn<'downloadAudio'>>}
+     */
+    downloadAudio(url, sourceType) {
+        return this._invoke('downloadAudio', {url, sourceType});
+    }
+
     // Utilities
 
     /**
