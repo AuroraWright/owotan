@@ -438,6 +438,23 @@ type ApiSurface = {
         };
         return: AudioDownloader.AudioBinaryBase64;
     };
+    playNativeAudio: {
+        params: {
+            /** Identifies the audio, to stop it. */
+            id: string;
+            /** The audio, encoded with base64. */
+            data: string;
+            volume: number;
+        };
+        /** Returned once the audio has stopped. */
+        return: void;
+    };
+    stopNativeAudio: {
+        params: {
+            id: string;
+        };
+        return: void;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];

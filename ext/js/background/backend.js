@@ -199,6 +199,8 @@ export class Backend {
             ['forceSync',                    this._onApiForceSync.bind(this)],
             ['fetchLocalAudioData',          this._onApiFetchLocalAudioData.bind(this)],
             ['downloadAudio',                this._onApiDownloadAudio.bind(this)],
+            ['playNativeAudio',              this._onApiPlayNativeAudio.bind(this)],
+            ['stopNativeAudio',              this._onApiStopNativeAudio.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1259,6 +1261,39 @@ export class Backend {
     /** @type {import('api').ApiHandler<'downloadAudio'>} */
     async _onApiDownloadAudio({url, sourceType}) {
         return await this._audioDownloader.downloadAudio(url, sourceType);
+    }
+
+    /** @type {import('api').ApiHandler<'playNativeAudio'>} */
+    async _onApiPlayNativeAudio({id, data, volume}) {
+        await this._sendNativeAudioMessage({action: 'playAudio', id, data, volume});
+    }
+
+    /** @type {import('api').ApiHandler<'stopNativeAudio'>} */
+    async _onApiStopNativeAudio({id}) {
+        await this._sendNativeAudioMessage({action: 'stopAudio', id});
+    }
+
+    /**
+     * Safari plays audio in a page only after a gesture in it, so the app extension that holds this one plays it.
+     * @param {{[key: string]: string|number}} message
+     * @returns {Promise<{[key: string]: unknown}>}
+     */
+    _sendNativeAudioMessage(message) {
+        return new Promise((resolve, reject) => {
+            // Safari sends native messages to the app extension whichever application is named.
+            chrome.runtime.sendNativeMessage('application.id', message, (/** @type {unknown} */ response) => {
+                const error = chrome.runtime.lastError;
+                if (error) {
+                    reject(new Error(`Cannot play audio: ${error.message}`));
+                } else if (typeof response !== 'object' || response === null) {
+                    reject(new Error('Cannot play audio'));
+                } else if ('error' in response) {
+                    reject(new Error(String(response.error)));
+                } else {
+                    resolve(/** @type {{[key: string]: unknown}} */ (response));
+                }
+            });
+        });
     }
 
     // Command handlers

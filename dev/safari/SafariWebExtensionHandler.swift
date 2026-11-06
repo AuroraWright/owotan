@@ -16,11 +16,13 @@
  */
 
 // Answers browser.runtime.sendNativeMessage from the extension. Safari does not let an extension read the
-// clipboard, so the extension asks the app extension, which can. On macOS it also starts the app, which serves
-// the Yomitan API (AppDelegate.swift), when the extension needs it. On iOS it reads audio from android.db, which
-// the app keeps where the app extension can read it (SceneDelegate.swift).
+// clipboard, so the extension asks the app extension, which can. The app extension also plays audio, which Safari
+// does not let a page play without a gesture (AudioPlayer). On macOS it also starts the app, which serves the
+// Yomitan API (AppDelegate.swift), when the extension needs it. On iOS it reads audio from android.db, which the app
+// keeps where the app extension can read it (SceneDelegate.swift).
 // dev/bin/build-safari-app.js puts this file in place of the one Xcode's converter generates.
 
+import AVFoundation
 import SafariServices
 #if os(macOS)
 import AppKit
@@ -48,6 +50,11 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {
         let request = context.inputItems.first as? NSExtensionItem
         let message = request?.userInfo?[Self.messageKey] as? [String: Any]
+        let respond = { (response: [String: Any]) in
+            let item = NSExtensionItem()
+            item.userInfo = [Self.messageKey: response]
+            context.completeRequest(returningItems: [item], completionHandler: nil)
+        }
 
         let response: [String: Any]
         switch message?["action"] as? String {
@@ -55,6 +62,13 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             response = ["text": Self.clipboardText()]
         case "getClipboardImage":
             response = ["image": Self.clipboardImage() ?? NSNull()]
+        case "playAudio":
+            // Answered once the audio has stopped, as iOS suspends the app extension once it has answered.
+            AudioPlayer.play(id: message?["id"] as? String ?? "", data: message?["data"] as? String ?? "", volume: message?["volume"] as? Double ?? 1, completion: respond)
+            return
+        case "stopAudio":
+            AudioPlayer.stop(id: message?["id"] as? String ?? "")
+            response = [:]
         #if os(macOS)
         case "startApiServer":
             response = Self.startApiServer(port: message?["port"] as? Int ?? 19633)
@@ -68,9 +82,7 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             response = ["error": "Unsupported message"]
         }
 
-        let item = NSExtensionItem()
-        item.userInfo = [Self.messageKey: response]
-        context.completeRequest(returningItems: [item], completionHandler: nil)
+        respond(response)
     }
 
     private static func clipboardText() -> String {
@@ -156,6 +168,92 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         let value = data.map { "data:image/png;base64," + $0.base64EncodedString() }
         image = (changeCount, value)
         return value
+    }
+}
+
+/// Plays audio for the extension. Safari plays audio in a page only after a gesture in it has started audio, which a
+/// popup never gets when it opens on hover or for the first lookup on a page, while the app extension can play audio
+/// whenever it is asked to.
+/// The message to play audio is answered once the audio has stopped, as iOS suspends the app extension once it has
+/// answered every message; the extension stops it with a message of its own. One audio plays at a time.
+final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
+    private static let lock = NSLock()
+    /// The audio that plays, with the identifier the extension gave it and the answer to the message that plays it.
+    private static var current: (player: AVAudioPlayer, id: String, completion: ([String: Any]) -> Void)?
+    private static let delegate = AudioPlayer()
+
+    /// Plays audio encoded with base64, in place of the audio that plays, and calls the completion once it stops.
+    static func play(id: String, data: String, volume: Double, completion: @escaping ([String: Any]) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        finish(["stopped": true], deactivating: false)
+        guard let bytes = Data(base64Encoded: data) else {
+            completion(["error": "The audio is not base64"])
+            return
+        }
+        do {
+            #if os(iOS)
+            // Audio playing in other apps, such as music, is lowered while this plays. Only an app extension with the
+            // background mode for audio can play it (dev/bin/build-safari-app.js), as iOS runs it in the background.
+            try AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+            #endif
+            let player = try AVAudioPlayer(data: bytes)
+            player.delegate = delegate
+            player.volume = Float(max(0, min(1, volume)))
+            guard player.play() else {
+                deactivate()
+                completion(["error": "The audio could not be played"])
+                return
+            }
+            current = (player, id, completion)
+            // In case the player never reports the end of the audio, which would keep the message from being answered.
+            DispatchQueue.main.asyncAfter(deadline: .now() + player.duration + 5) {
+                lock.lock()
+                defer { lock.unlock() }
+                if current?.player === player {
+                    finish(["finished": true], deactivating: true)
+                }
+            }
+        } catch {
+            deactivate()
+            completion(["error": error.localizedDescription])
+        }
+    }
+
+    /// Stops the audio with the identifier, if it still plays.
+    static func stop(id: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if current?.id == id {
+            finish(["stopped": true], deactivating: true)
+        }
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        if Self.current?.player === player {
+            Self.finish(["finished": true], deactivating: true)
+        }
+    }
+
+    /// Stops the audio that plays and answers the message that played it. Called with the lock held.
+    private static func finish(_ response: [String: Any], deactivating: Bool) {
+        guard let current else { return }
+        self.current = nil
+        current.player.stop()
+        if deactivating {
+            deactivate()
+        }
+        current.completion(response)
+    }
+
+    /// Lets audio playing in other apps return to its volume.
+    private static func deactivate() {
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        #endif
     }
 }
 

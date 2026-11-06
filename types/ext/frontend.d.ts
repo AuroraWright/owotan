@@ -49,11 +49,3 @@ export type ConstructorDetails = {
 };
 
 export type PageType = 'web' | 'popup' | 'search';
-
-/** Sent to the frame that hosts a popup, to let the popup play audio during a gesture in a frame it contains. */
-export type UnlockAudioMessage = {
-    action: 'frontendUnlockAudio';
-    params: {
-        id: string;
-    };
-};

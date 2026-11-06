@@ -29,14 +29,6 @@ import {TextSourceRange} from '../dom/text-source-range.js';
 import {TextScanner} from '../language/text-scanner.js';
 
 /**
- * How long to keep trying to unlock the audio of a popup that is not yet created or whose frame is loading, in
- * milliseconds, within the second that Safari carries a gesture through timers.
- */
-const UNLOCK_AUDIO_RETRY_DURATION = 900;
-/** How often to try to unlock the audio of a popup that is not yet created or whose frame is loading, in milliseconds. */
-const UNLOCK_AUDIO_RETRY_INTERVAL = 50;
-
-/**
  * This is the main class responsible for scanning and handling webpage content.
  */
 export class Frontend {
@@ -108,8 +100,6 @@ export class Frontend {
         });
         /** @type {boolean} */
         this._textScannerHasBeenEnabled = false;
-        /** @type {?import('environment').Browser} */
-        this._browser = browser;
         /** @type {Map<'default'|'window'|'iframe'|'proxy', Promise<?import('popup').PopupAny>>} */
         this._popupCache = new Map();
         /** @type {EventListenerCollection} */
@@ -181,14 +171,6 @@ export class Frontend {
         this._textScanner.prepare();
 
         window.addEventListener('resize', this._onResize.bind(this), false);
-        if (this._browser === 'safari') {
-            // A key press counts too, so pressing the scanning modifier lets the popup of the lookup play audio.
-            const onGesture = this._onGesture.bind(this);
-            for (const type of ['touchend', 'mousedown', 'keydown']) {
-                window.addEventListener(type, onGesture, {capture: true, passive: true});
-            }
-            window.addEventListener('message', this._onWindowMessage.bind(this), false);
-        }
         addFullscreenChangeEventListener(this._updatePopup.bind(this));
 
         const {visualViewport} = window;
@@ -355,46 +337,6 @@ export class Frontend {
     }
 
     // Private
-
-    /**
-     * Lets the popup play audio, such as audio played automatically for a lookup, since the event is a gesture. The
-     * popup of the first lookup can be created after the gesture, such as after the scanning modifier is pressed.
-     */
-    _onGesture() {
-        if (!this._textScanner.isEnabled()) { return; } // Nothing is looked up, so the popup is not loaded either
-        this._unlockAudioWhenLoaded(() => this._popup !== null && this._popup.unlockAudio());
-    }
-
-    /**
-     * Unlocks the audio of a popup in this frame for a gesture in a frame it contains, such as a popup whose nested
-     * popup is in this frame, which `PopupProxy.unlockAudio` sends while the gesture is handled. Any page could send
-     * this, but it only lets the popup play audio.
-     * @param {MessageEvent<unknown>} event
-     */
-    _onWindowMessage({data}) {
-        if (typeof data !== 'object' || data === null) { return; }
-        const {action, params} = /** @type {{action?: unknown, params?: unknown}} */ (data);
-        if (action !== 'frontendUnlockAudio' || typeof params !== 'object' || params === null) { return; }
-        const {id} = /** @type {{id?: unknown}} */ (params);
-        if (typeof id === 'string') {
-            this._unlockAudioWhenLoaded(() => this._popupFactory.unlockAudio(id));
-        }
-    }
-
-    /**
-     * Unlocks the audio of a popup during a gesture, retrying until it is created and its frame has loaded, as the
-     * popup of the first lookup is still loading when the gesture ends. Safari carries a gesture through timers for about a second.
-     * @param {() => boolean} unlock Unlocks the audio, returning whether the popup could be sent the gesture.
-     */
-    _unlockAudioWhenLoaded(unlock) {
-        if (unlock()) { return; }
-        const start = safePerformance.now();
-        const retry = () => {
-            if (unlock() || safePerformance.now() - start >= UNLOCK_AUDIO_RETRY_DURATION) { return; }
-            setTimeout(retry, UNLOCK_AUDIO_RETRY_INTERVAL);
-        };
-        setTimeout(retry, UNLOCK_AUDIO_RETRY_INTERVAL);
-    }
 
     /**
      * @returns {void}

@@ -475,6 +475,24 @@ export class API {
         return this._invoke('downloadAudio', {url, sourceType});
     }
 
+    /**
+     * @param {import('api').ApiParam<'playNativeAudio', 'id'>} id
+     * @param {import('api').ApiParam<'playNativeAudio', 'data'>} data
+     * @param {import('api').ApiParam<'playNativeAudio', 'volume'>} volume
+     * @returns {Promise<import('api').ApiReturn<'playNativeAudio'>>}
+     */
+    playNativeAudio(id, data, volume) {
+        return this._invoke('playNativeAudio', {id, data, volume});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'stopNativeAudio', 'id'>} id
+     * @returns {Promise<import('api').ApiReturn<'stopNativeAudio'>>}
+     */
+    stopNativeAudio(id) {
+        return this._invoke('stopNativeAudio', {id});
+    }
+
     // Utilities
 
     /**

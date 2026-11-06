@@ -117,6 +117,9 @@ const iosAppInfoPath = path.join(appDirectory, appName, 'iOS (App)', 'Info.plist
 for (const key of ['UIFileSharingEnabled', 'LSSupportsOpeningDocumentsInPlace']) {
     run('plutil', ['-replace', key, '-bool', 'YES', iosAppInfoPath]);
 }
+// The app extension plays audio for the extension (SafariWebExtensionHandler.swift). iOS runs it in the background,
+// where only a process with the background mode for audio can start audio.
+run('plutil', ['-replace', 'UIBackgroundModes', '-json', '["audio"]', path.join(appDirectory, appName, 'iOS (Extension)', 'Info.plist')]);
 const iosEntitlementsName = `${appName} (iOS).entitlements`;
 fs.writeFileSync(path.join(appDirectory, appName, iosEntitlementsName), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
