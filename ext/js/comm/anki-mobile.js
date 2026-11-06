@@ -23,6 +23,11 @@ import {getFileNameExtension, getImageMediaTypeFromFileName} from '../media/medi
 const MAX_MEDIA_FILES = 16;
 
 /**
+ * The image types that AnkiMobile turns into media files, from a field that is nothing but a `data:` URL of one.
+ */
+const FILE_IMAGE_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
+
+/**
  * Prefix of the fragment that AnkiMobile adds to the page's URL when it opens the page again after adding a note.
  */
 export const ANKI_MOBILE_ADDED_HASH_PREFIX = '#yomitan-anki-added-';
@@ -31,7 +36,9 @@ export const ANKI_MOBILE_ADDED_HASH_PREFIX = '#yomitan-anki-added-';
  * Builds the links of AnkiMobile's URL scheme (https://docs.ankimobile.net/url-schemes.html), which is the only
  * way to add notes to Anki on iOS. AnkiMobile adds a note silently, and it opens the link given as `x-success`
  * when it has added it. It cannot store media files, but it turns a field that is nothing but a `data:` URL
- * into a media file, so media are sent that way.
+ * into a media file, so media are sent that way. Images next to other content, such as a glossary's, and images
+ * of the types that it does not turn into files, such as SVG, are kept in the field as `data:` URLs, which cards
+ * show.
  */
 export class AnkiMobile {
     constructor() {
@@ -65,7 +72,7 @@ export class AnkiMobile {
      * @param {boolean} allowDuplicate Whether AnkiMobile adds a note whose first field another note of its type has.
      * @param {?string} successUrl The link AnkiMobile opens once the note was added.
      * @returns {string}
-     * @throws {Error} If a field has media alongside other content, which AnkiMobile cannot add.
+     * @throws {Error} If a field has audio alongside other content, which AnkiMobile cannot add.
      */
     getAddNoteUrl(note, allowDuplicate, successUrl) {
         const {deckName, modelName, tags, fields} = note;
@@ -118,14 +125,20 @@ export class AnkiMobile {
         const fileName = getMediaFileName(value.trim());
         if (fileName !== null) {
             const dataUrl = this._media.get(fileName);
-            if (typeof dataUrl !== 'undefined') { return dataUrl; }
+            if (typeof dataUrl !== 'undefined' && isFileDataUrl(dataUrl)) { return dataUrl; }
         }
-        for (const mediaFileName of this._media.keys()) {
-            if (value.includes(mediaFileName)) {
-                throw new Error(`AnkiMobile can only add media to a field that has nothing else in it, unlike the field ${name}`);
+        let result = value;
+        for (const [mediaFileName, dataUrl] of this._media) {
+            if (!result.includes(mediaFileName)) { continue; }
+            if (dataUrl.startsWith('data:image/')) {
+                // A glossary's image is in an `img` element, a link and a style attribute's `url()`
+                result = result.replaceAll(mediaFileName, dataUrl);
+            }
+            if (result.includes(mediaFileName)) {
+                throw new Error(`AnkiMobile cannot add ${mediaFileName} to the field ${name}, since only images can be added to a field with other content`);
             }
         }
-        return value;
+        return result;
     }
 }
 
@@ -136,6 +149,15 @@ export class AnkiMobile {
 function getMediaFileName(value) {
     const match = /^\[sound:([^\]]+)\]$/.exec(value) ?? /^<img src="([^"]+)"\s*\/?>$/.exec(value);
     return match !== null ? match[1] : null;
+}
+
+/**
+ * @param {string} dataUrl
+ * @returns {boolean} Whether AnkiMobile turns a field that is nothing but the `data:` URL into a media file.
+ */
+function isFileDataUrl(dataUrl) {
+    const mediaType = dataUrl.substring('data:'.length, dataUrl.indexOf(';'));
+    return mediaType.startsWith('audio/') || FILE_IMAGE_MEDIA_TYPES.has(mediaType);
 }
 
 /**
