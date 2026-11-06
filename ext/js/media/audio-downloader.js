@@ -68,6 +68,68 @@ const LOCAL_AUDIO_MIME_TYPES = new Map([
     ['.flac', 'audio/flac'],
 ]);
 
+/**
+ * The countries where each language is spoken natively, as Forvo names them, whose speakers' pronunciations on Forvo
+ * are listed before the others'. Languages that no country speaks natively, such as Latin, have none.
+ * @type {Map<string, string[]>}
+ */
+const FORVO_NATIVE_COUNTRIES = new Map([
+    ['aii', ['Iraq', 'Syria', 'Iran', 'Turkey']],
+    ['ar', ['Algeria', 'Bahrain', 'Egypt', 'Iraq', 'Jordan', 'Kuwait', 'Lebanon', 'Libya', 'Mauritania', 'Morocco', 'Oman', 'Palestine', 'Qatar', 'Saudi Arabia', 'Sudan', 'Syria', 'Tunisia', 'United Arab Emirates', 'Yemen']],
+    ['arz', ['Egypt']],
+    ['be', ['Belarus']],
+    ['bg', ['Bulgaria']],
+    ['br', ['France']],
+    ['cs', ['Czech Republic', 'Czechia']],
+    ['cy', ['United Kingdom']],
+    ['da', ['Denmark']],
+    ['de', ['Germany', 'Austria', 'Switzerland', 'Liechtenstein']],
+    ['el', ['Greece', 'Cyprus']],
+    ['en', ['United States', 'United Kingdom', 'Canada', 'Australia', 'Ireland', 'New Zealand']],
+    ['es', ['Spain', 'Mexico', 'Argentina', 'Bolivia', 'Chile', 'Colombia', 'Costa Rica', 'Cuba', 'Dominican Republic', 'Ecuador', 'El Salvador', 'Equatorial Guinea', 'Guatemala', 'Honduras', 'Nicaragua', 'Panama', 'Paraguay', 'Peru', 'Puerto Rico', 'Uruguay', 'Venezuela']],
+    ['et', ['Estonia']],
+    ['eu', ['Spain', 'France']],
+    ['fa', ['Iran', 'Afghanistan', 'Tajikistan']],
+    ['fi', ['Finland']],
+    ['fr', ['France', 'Belgium', 'Switzerland', 'Canada', 'Luxembourg']],
+    ['ga', ['Ireland']],
+    ['gd', ['United Kingdom']],
+    ['gv', ['Isle of Man']],
+    ['haw', ['United States']],
+    ['he', ['Israel']],
+    ['hi', ['India']],
+    ['hu', ['Hungary']],
+    ['hy', ['Armenia']],
+    ['id', ['Indonesia']],
+    ['it', ['Italy', 'Switzerland', 'San Marino']],
+    ['ja', ['Japan']],
+    ['ka', ['Georgia']],
+    ['km', ['Cambodia']],
+    ['kn', ['India']],
+    ['ko', ['South Korea', 'Korea, Republic of', 'Republic of Korea', 'North Korea']],
+    ['kw', ['United Kingdom']],
+    ['lo', ['Laos']],
+    ['lv', ['Latvia']],
+    ['mn', ['Mongolia']],
+    ['mt', ['Malta']],
+    ['nl', ['Netherlands', 'Belgium', 'Suriname']],
+    ['no', ['Norway']],
+    ['pl', ['Poland']],
+    ['pt', ['Portugal', 'Brazil']],
+    ['ro', ['Romania', 'Moldova']],
+    ['ru', ['Russia', 'Russian Federation']],
+    ['sh', ['Serbia', 'Croatia', 'Bosnia and Herzegovina', 'Montenegro']],
+    ['sq', ['Albania', 'Kosovo']],
+    ['sv', ['Sweden', 'Finland']],
+    ['th', ['Thailand']],
+    ['tl', ['Philippines']],
+    ['tr', ['Turkey', 'Türkiye']],
+    ['uk', ['Ukraine']],
+    ['vi', ['Vietnam', 'Viet Nam']],
+    ['yue', ['Hong Kong', 'Macau', 'Macao', 'China']],
+    ['zh', ['China', 'Taiwan', 'Singapore']],
+]);
+
 export class AudioDownloader {
     /**
      * @param {RequestBuilder} requestBuilder
@@ -89,6 +151,7 @@ export class AudioDownloader {
             ['custom', this._getInfoCustom.bind(this)],
             ['custom-json', this._getInfoCustomJson.bind(this)],
             ['local-android-db', this._getInfoLocalAndroidDb.bind(this)],
+            ['forvo', this._getInfoForvo.bind(this)],
         ]));
         /** @type {Intl.DisplayNames} */
         this._regionNames = new Intl.DisplayNames(['en'], {type: 'region'});
@@ -504,6 +567,55 @@ export class AudioDownloader {
     }
 
     /**
+     * Lists Forvo's pronunciations of the term in the language, or of the reading when it has none, as the Yomichan
+     * Forvo Server add-on for Anki does: those of speakers from countries where the language is spoken natively
+     * first, each the best rated first.
+     * @type {import('audio-downloader').GetInfoHandler}
+     */
+    async _getInfoForvo(term, reading, details, languageSummary) {
+        if (typeof details !== 'object' || details === null) {
+            throw new Error('Invalid arguments');
+        }
+        const {apiKey} = details;
+        if (typeof apiKey !== 'string' || apiKey.length === 0) {
+            throw new Error('No Forvo API key defined');
+        }
+        let results = await this._getForvoPronunciations(term, apiKey, languageSummary.iso);
+        if (results.length === 0 && reading.length > 0 && reading !== term) {
+            results = await this._getForvoPronunciations(reading, apiKey, languageSummary.iso);
+        }
+        return results;
+    }
+
+    /**
+     * @param {string} word
+     * @param {string} apiKey
+     * @param {string} language
+     * @returns {Promise<import('audio-downloader').Info1[]>}
+     */
+    async _getForvoPronunciations(word, apiKey, language) {
+        const fetchUrl = `https://apicorporate.forvo.com/api2/v1.1/${encodeURIComponent(apiKey)}/word-pronunciations/word/${encodeURIComponent(word)}/language/${encodeURIComponent(language)}/order/rate-desc`;
+        const response = await this._requestBuilder.fetchAnonymous(fetchUrl, DEFAULT_REQUEST_INIT_PARAMS);
+        if (!response.ok) {
+            throw new Error(`Invalid response: ${response.status}`);
+        }
+        /** @type {import('audio-downloader').ForvoPronunciationsResponse} */
+        const responseJson = await readResponseJson(response);
+        const nativeCountries = new Set((FORVO_NATIVE_COUNTRIES.get(language) ?? []).map((country) => country.toLowerCase()));
+        /**
+         * @param {import('audio-downloader').ForvoPronunciation} pronunciation
+         * @returns {number}
+         */
+        const getCountryOrder = ({country}) => (typeof country === 'string' && nativeCountries.has(country.toLowerCase()) ? 0 : 1);
+        // Sorting keeps Forvo's order, by rating, among pronunciations of the same order.
+        const pronunciations = [...responseJson.data.items].sort((a, b) => getCountryOrder(a) - getCountryOrder(b));
+        return pronunciations.map(({pathmp3, username, sex}) => {
+            const genderSymbol = sex === 'm' ? '♂' : (sex === 'f' ? '♀' : '');
+            return {type: 'url', url: pathmp3, name: `${genderSymbol}${username}`};
+        });
+    }
+
+    /**
      * @param {string} term
      * @param {string} reading
      * @param {string} url
@@ -748,5 +860,5 @@ export function getRequiredAudioSources(language, sources) {
         requiredSources.delete(type);
     }
 
-    return [...requiredSources].map((type) => ({type, url: '', voice: ''}));
+    return [...requiredSources].map((type) => ({type, url: '', voice: '', apiKey: ''}));
 }

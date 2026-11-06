@@ -89,3 +89,17 @@ export type WikimediaCommonsFileResultImageInfo = {
     url: string;
     user: string;
 };
+
+export type ForvoPronunciationsResponse = {
+    data: {
+        items: ForvoPronunciation[];
+    };
+};
+
+export type ForvoPronunciation = {
+    pathmp3: string;
+    username: string;
+    /** `m` or `f`, if the speaker gave it. */
+    sex?: string;
+    country?: string;
+};

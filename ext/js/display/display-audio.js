@@ -67,6 +67,7 @@ export class DisplayAudio {
             ['custom', 'Custom URL'],
             ['custom-json', 'Custom URL (JSON)'],
             ['local-android-db', 'Local android.db'],
+            ['forvo', 'Forvo'],
         ]);
         /** @type {?boolean} */
         this._enableDefaultAudioSources = null;
@@ -187,12 +188,12 @@ export class DisplayAudio {
         /** @type {Map<string, import('display-audio').AudioSource[]>} */
         const nameMap = new Map();
         this._audioSources.length = 0;
-        for (const {type, url, voice} of sources) {
-            this._addAudioSourceInfo(type, url, voice, true, nameMap);
+        for (const {type, url, voice, apiKey} of sources) {
+            this._addAudioSourceInfo(type, url, voice, apiKey, true, nameMap);
             requiredAudioSources.delete(type);
         }
         for (const type of requiredAudioSources) {
-            this._addAudioSourceInfo(type, '', '', false, nameMap);
+            this._addAudioSourceInfo(type, '', '', '', false, nameMap);
         }
 
         const data = document.documentElement.dataset;
@@ -278,10 +279,11 @@ export class DisplayAudio {
      * @param {import('settings').AudioSourceType} type
      * @param {string} url
      * @param {string} voice
+     * @param {string} apiKey
      * @param {boolean} isInOptions
      * @param {Map<string, import('display-audio').AudioSource[]>} nameMap
      */
-    _addAudioSourceInfo(type, url, voice, isInOptions, nameMap) {
+    _addAudioSourceInfo(type, url, voice, apiKey, isInOptions, nameMap) {
         const index = this._audioSources.length;
         const downloadable = this._sourceIsDownloadable(type);
         let name = this._audioSourceTypeNames.get(type);
@@ -303,6 +305,7 @@ export class DisplayAudio {
             type,
             url,
             voice,
+            apiKey,
             isInOptions,
             downloadable,
             name,
@@ -998,7 +1001,7 @@ export class DisplayAudio {
      * @returns {import('display-audio').AudioSourceShort}
      */
     _getSourceData(source) {
-        const {type, url, voice} = source;
-        return {type, url, voice};
+        const {type, url, voice, apiKey} = source;
+        return {type, url, voice, apiKey};
     }
 }

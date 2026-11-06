@@ -590,6 +590,7 @@ export class OptionsUtil {
             this._updateVersion76,
             this._updateVersion77,
             this._updateVersion78,
+            this._updateVersion79,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1870,6 +1871,18 @@ export class OptionsUtil {
         delete options.global.database;
         for (const profile of options.profiles) {
             delete profile.options.scanning.matchTypePrefix;
+        }
+    }
+
+    /**
+     *  - Added audio.sources[].apiKey, for the Forvo audio source.
+     *  @type {import('options-util').UpdateFunction}
+     */
+    async _updateVersion79(options) {
+        for (const profile of options.profiles) {
+            for (const source of profile.options.audio.sources) {
+                source.apiKey = '';
+            }
         }
     }
 

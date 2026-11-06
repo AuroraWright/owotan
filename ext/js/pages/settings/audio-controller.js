@@ -302,7 +302,7 @@ export class AudioController extends EventDispatcher {
     async _addAudioSource() {
         const type = this._getUnusedAudioSourceType();
         /** @type {import('settings').AudioSourceOptions} */
-        const source = {type, url: '', voice: ''};
+        const source = {type, url: '', voice: '', apiKey: ''};
         const index = this._audioSourceEntries.length;
         this._createAudioSourceEntry(index, source);
         await this._settingsController.modifyProfileSettings([{
@@ -350,6 +350,8 @@ class AudioSourceEntry {
         this._url = source.url;
         /** @type {string} */
         this._voice = source.voice;
+        /** @type {string} */
+        this._apiKey = source.apiKey;
         /** @type {HTMLElement} */
         this._node = node;
         /** @type {EventListenerCollection} */
@@ -360,6 +362,8 @@ class AudioSourceEntry {
         this._urlInput = querySelectorNotNull(this._node, '.audio-source-parameter-container[data-field=url] .audio-source-parameter');
         /** @type {HTMLSelectElement} */
         this._voiceSelect = querySelectorNotNull(this._node, '.audio-source-parameter-container[data-field=voice] .audio-source-parameter');
+        /** @type {HTMLInputElement} */
+        this._apiKeyInput = querySelectorNotNull(this._node, '.audio-source-parameter-container[data-field=apiKey] .audio-source-parameter');
         /** @type {HTMLButtonElement} */
         this._upButton = querySelectorNotNull(this._node, '#audio-source-move-up');
         /** @type {HTMLButtonElement} */
@@ -394,10 +398,12 @@ class AudioSourceEntry {
 
         this._typeSelect.value = this._type;
         this._urlInput.value = this._url;
+        this._apiKeyInput.value = this._apiKey;
 
         this._eventListeners.addEventListener(this._typeSelect, 'change', this._onTypeSelectChange.bind(this), false);
         this._eventListeners.addEventListener(this._urlInput, 'change', this._onUrlInputChange.bind(this), false);
         this._eventListeners.addEventListener(this._voiceSelect, 'change', this._onVoiceSelectChange.bind(this), false);
+        this._eventListeners.addEventListener(this._apiKeyInput, 'change', this._onApiKeyInputChange.bind(this), false);
         this._eventListeners.addEventListener(menuButton, 'menuOpen', this._onMenuOpen.bind(this), false);
         this._eventListeners.addEventListener(menuButton, 'menuClose', this._onMenuClose.bind(this), false);
         this._eventListeners.addEventListener(this._upButton, 'click', (() => { this._move(-1); }).bind(this), false);
@@ -474,6 +480,14 @@ class AudioSourceEntry {
     }
 
     /**
+     * @param {Event} e
+     */
+    _onApiKeyInputChange(e) {
+        const element = /** @type {HTMLInputElement} */ (e.currentTarget);
+        void this._setApiKey(element.value);
+    }
+
+    /**
      * @param {import('popup-menu').MenuOpenEvent} e
      */
     _onMenuOpen(e) {
@@ -484,6 +498,7 @@ class AudioSourceEntry {
             case 'custom':
             case 'custom-json':
             case 'local-android-db':
+            case 'forvo':
             case 'text-to-speech':
             case 'text-to-speech-reading':
                 hasHelp = true;
@@ -539,6 +554,14 @@ class AudioSourceEntry {
         await this._parent.settingsController.setProfileSetting(`audio.sources[${this._index}].voice`, value);
     }
 
+    /**
+     * @param {string} value
+     */
+    async _setApiKey(value) {
+        this._apiKey = value;
+        await this._parent.settingsController.setProfileSetting(`audio.sources[${this._index}].apiKey`, value);
+    }
+
     /** */
     _updateTypeParameter() {
         let field = null;
@@ -550,6 +573,9 @@ class AudioSourceEntry {
             case 'text-to-speech':
             case 'text-to-speech-reading':
                 field = 'voice';
+                break;
+            case 'forvo':
+                field = 'apiKey';
                 break;
         }
         for (const node of /** @type {NodeListOf<HTMLElement>} */ (this._node.querySelectorAll('.audio-source-parameter-container'))) {
@@ -570,6 +596,9 @@ class AudioSourceEntry {
                 break;
             case 'local-android-db':
                 this._showModal('audio-source-help-local-android-db');
+                break;
+            case 'forvo':
+                this._showModal('audio-source-help-forvo');
                 break;
             case 'text-to-speech':
             case 'text-to-speech-reading':
@@ -619,6 +648,7 @@ class AudioSourceEntry {
             case 'custom':
             case 'custom-json':
             case 'local-android-db':
+            case 'forvo':
                 return value;
             default:
                 return null;

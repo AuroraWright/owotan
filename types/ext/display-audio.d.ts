@@ -55,6 +55,7 @@ export type AudioSource = {
     type: Settings.AudioSourceType;
     url: string;
     voice: string;
+    apiKey: string;
     isInOptions: boolean;
     downloadable: boolean;
     name: string;
@@ -66,6 +67,7 @@ export type AudioSourceShort = {
     type: Settings.AudioSourceType;
     url: string;
     voice: string;
+    apiKey: string;
 };
 
 export type AudioMediaOptions = {

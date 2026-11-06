@@ -449,7 +449,8 @@
                                             "required": [
                                                 "type",
                                                 "url",
-                                                "voice"
+                                                "voice",
+                                                "apiKey"
                                             ],
                                             "properties": {
                                                 "type": {
@@ -464,7 +465,8 @@
                                                         "text-to-speech-reading",
                                                         "custom",
                                                         "custom-json",
-                                                        "local-android-db"
+                                                        "local-android-db",
+                                                        "forvo"
                                                     ],
                                                     "default": "jpod101"
                                                 },
@@ -473,6 +475,10 @@
                                                     "default": ""
                                                 },
                                                 "voice": {
+                                                    "type": "string",
+                                                    "default": ""
+                                                },
+                                                "apiKey": {
                                                     "type": "string",
                                                     "default": ""
                                                 }
