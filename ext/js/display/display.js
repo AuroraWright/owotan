@@ -502,7 +502,6 @@ export class Display extends EventDispatcher {
                 preventMiddleMouseOnTextHover: scanningOptions.preventMiddleMouse.onTextHover,
                 preventBackForwardOnPage: scanningOptions.preventBackForward.onSearchQuery,
                 preventBackForwardOnTextHover: scanningOptions.preventBackForward.onTextHover,
-                matchTypePrefix: false,
                 sentenceParsingOptions,
                 scanWithoutMousemove: scanningOptions.scanWithoutMousemove,
                 scanResolution: scanningOptions.scanResolution,
@@ -647,7 +646,7 @@ export class Display extends EventDispatcher {
         const details = {
             focus: false,
             historyMode: 'clear',
-            params: this._createSearchParams(type, query, false, this._queryOffset),
+            params: this._createSearchParams(type, query, this._queryOffset),
             state: newState,
             content: {
                 contentOrigin: this.getContentOrigin(),
@@ -905,7 +904,7 @@ export class Display extends EventDispatcher {
         const details = {
             focus: false,
             historyMode,
-            params: this._createSearchParams(type, query, false, sentenceOffset),
+            params: this._createSearchParams(type, query, sentenceOffset),
             state: {
                 sentence,
                 optionsContext,
@@ -1004,7 +1003,7 @@ export class Display extends EventDispatcher {
             const details = {
                 focus: false,
                 historyMode: 'new',
-                params: this._createSearchParams('kanji', query, false, null),
+                params: this._createSearchParams('kanji', query, null),
                 state: {
                     focusEntry: 0,
                     optionsContext,
@@ -1343,51 +1342,26 @@ export class Display extends EventDispatcher {
      * @param {boolean} isKanji
      * @param {string} source
      * @param {string} primaryReading
-     * @param {boolean} wildcardsEnabled
      * @param {import('settings').OptionsContext} optionsContext
      * @returns {Promise<import('dictionary').DictionaryEntry[]>}
      */
-    async _findDictionaryEntries(isKanji, source, primaryReading, wildcardsEnabled, optionsContext) {
+    async _findDictionaryEntries(isKanji, source, primaryReading, optionsContext) {
         /** @type {import('dictionary').DictionaryEntry[]} */
         let dictionaryEntries = [];
-        const {findDetails, source: source2} = this._getFindDetails(source, primaryReading, wildcardsEnabled);
+        /** @type {import('api').FindTermsDetails} */
+        const findDetails = {primaryReading};
         if (isKanji) {
             dictionaryEntries = await this._application.api.kanjiFind(source, optionsContext);
             if (dictionaryEntries.length > 0) { return dictionaryEntries; }
 
-            dictionaryEntries = (await this._application.api.termsFind(source2, findDetails, optionsContext)).dictionaryEntries;
+            dictionaryEntries = (await this._application.api.termsFind(source, findDetails, optionsContext)).dictionaryEntries;
         } else {
-            dictionaryEntries = (await this._application.api.termsFind(source2, findDetails, optionsContext)).dictionaryEntries;
+            dictionaryEntries = (await this._application.api.termsFind(source, findDetails, optionsContext)).dictionaryEntries;
             if (dictionaryEntries.length > 0) { return dictionaryEntries; }
 
             dictionaryEntries = await this._application.api.kanjiFind(source, optionsContext);
         }
         return dictionaryEntries;
-    }
-
-    /**
-     * @param {string} source
-     * @param {string} primaryReading
-     * @param {boolean} wildcardsEnabled
-     * @returns {{findDetails: import('api').FindTermsDetails, source: string}}
-     */
-    _getFindDetails(source, primaryReading, wildcardsEnabled) {
-        /** @type {import('api').FindTermsDetails} */
-        const findDetails = {primaryReading};
-        if (wildcardsEnabled) {
-            const match = /^([*\uff0a]*)([\w\W]*?)([*\uff0a]*)$/.exec(source);
-            if (match !== null) {
-                if (match[1]) {
-                    findDetails.matchType = 'suffix';
-                    findDetails.deinflect = false;
-                } else if (match[3]) {
-                    findDetails.matchType = 'prefix';
-                    findDetails.deinflect = false;
-                }
-                source = match[2];
-            }
-        }
-        return {findDetails, source};
     }
 
     /**
@@ -1397,7 +1371,6 @@ export class Display extends EventDispatcher {
      */
     async _setContentTermsOrKanji(type, urlSearchParams, token) {
         const lookup = (urlSearchParams.get('lookup') !== 'false');
-        const wildcardsEnabled = (urlSearchParams.get('wildcards') !== 'off');
         const hasEnabledDictionaries = this._options ? this._options.dictionaries.some(({enabled}) => enabled) : false;
 
         // Set query
@@ -1439,7 +1412,7 @@ export class Display extends EventDispatcher {
         let {dictionaryEntries} = content;
         if (!Array.isArray(dictionaryEntries)) {
             safePerformance.mark('display:findDictionaryEntries:start');
-            dictionaryEntries = hasEnabledDictionaries && lookup && query.length > 0 ? await this._findDictionaryEntries(type === 'kanji', query, primaryReading, wildcardsEnabled, optionsContext) : [];
+            dictionaryEntries = hasEnabledDictionaries && lookup && query.length > 0 ? await this._findDictionaryEntries(type === 'kanji', query, primaryReading, optionsContext) : [];
             safePerformance.mark('display:findDictionaryEntries:end');
             safePerformance.measure('display:findDictionaryEntries', 'display:findDictionaryEntries:start', 'display:findDictionaryEntries:end');
             if (this._setContentToken !== token) { return; }
@@ -1899,11 +1872,10 @@ export class Display extends EventDispatcher {
     /**
      * @param {import('display').PageType} type
      * @param {string} query
-     * @param {boolean} wildcards
      * @param {?number} sentenceOffset
      * @returns {import('display').HistoryParams}
      */
-    _createSearchParams(type, query, wildcards, sentenceOffset) {
+    _createSearchParams(type, query, sentenceOffset) {
         /** @type {import('display').HistoryParams} */
         const params = {};
         const fullQuery = this._fullQuery;
@@ -1917,9 +1889,6 @@ export class Display extends EventDispatcher {
         }
         if (typeof type === 'string') {
             params.type = type;
-        }
-        if (!wildcards) {
-            params.wildcards = 'off';
         }
         if (this._queryParserVisibleOverride !== null) {
             params['full-visible'] = `${this._queryParserVisibleOverride}`;
@@ -2204,7 +2173,6 @@ export class Display extends EventDispatcher {
             params: {
                 type,
                 query,
-                wildcards: 'off',
             },
             state: {
                 focusEntry: 0,

@@ -269,9 +269,7 @@ export class SearchDisplayController {
      * @param {InputEvent} event
      */
     _searchTextKanaConversion(element, event) {
-        const platform = document.documentElement.dataset.platform ?? 'unknown';
-        const browser = document.documentElement.dataset.browser ?? 'unknown';
-        if (isComposing(event, platform, browser)) { return; }
+        if (isComposing(event, this._display.platform ?? 'unknown', this._display.browser ?? 'unknown')) { return; }
         const {kanaString, newSelectionStart} = convertToKanaIME(element.value, element.selectionStart);
         element.value = kanaString;
         element.setSelectionRange(newSelectionStart, newSelectionStart);

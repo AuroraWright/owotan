@@ -30,7 +30,6 @@ import type * as Language from './language';
 import type * as Log from './log';
 import type * as Settings from './settings';
 import type * as SettingsModifications from './settings-modifications';
-import type * as Translation from './translation';
 import type * as Translator from './translator';
 import type {ApiMessageNoFrameIdAny as ApplicationApiMessageNoFrameIdAny} from './application';
 import type {
@@ -46,7 +45,6 @@ import type {
 } from './api-map';
 
 export type FindTermsDetails = {
-    matchType?: Translation.FindTermsMatchType;
     deinflect?: boolean;
     primaryReading?: string;
 };
@@ -424,12 +422,6 @@ type ApiSurface = {
     forceSync: {
         params: void;
         return: void;
-    };
-    fetchLocalAudioData: {
-        params: {
-            url: string;
-        };
-        return: {data: string, contentType: string} | null;
     };
     downloadAudio: {
         params: {

@@ -18,6 +18,7 @@
 
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {toError} from '../core/to-error.js';
+import {isSafariExtension} from '../extension/app-extension.js';
 
 /**
  * This class is used to connect Yomitan to a native component that is
@@ -31,7 +32,7 @@ export class Mecab {
      */
     constructor() {
         /** @type {boolean} */
-        this._useWorker = chrome.runtime.getURL('/').startsWith('safari-web-extension:');
+        this._useWorker = isSafariExtension();
         /** @type {?import('mecab').Connection} */
         this._port = null;
         /** @type {number} */

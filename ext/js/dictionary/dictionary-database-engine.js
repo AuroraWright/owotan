@@ -75,13 +75,6 @@ export class DictionaryDatabaseEngine {
     }
 
     /**
-     * @returns {boolean}
-     */
-    isPrepared() {
-        return this._prepared;
-    }
-
-    /**
      * Reads the stored dictionaries again, for changes another context made.
      */
     async reload() {
@@ -142,14 +135,12 @@ export class DictionaryDatabaseEngine {
     }
 
     /**
+     * Finds the terms whose expression or reading is one of the list, which a hash index finds exactly.
      * @param {string[]} termList
      * @param {string[]} dictionaryNames
-     * @param {import('dictionary-database').MatchType} matchType
      * @returns {Promise<import('dictionary-database').TermEntry[]>}
      */
-    async findTermsBulk(termList, dictionaryNames, matchType) {
-        // Only exact matches can be found in a hash index, so wildcard searches find exact matches.
-        void matchType;
+    async findTermsBulk(termList, dictionaryNames) {
         const hoshidicts = await this._getHoshidicts();
         const enabled = new Set(dictionaryNames);
         const rowLists = hoshidicts.findTerms(termList);
@@ -158,23 +149,12 @@ export class DictionaryDatabaseEngine {
         /** @type {import('dictionary-database').TermEntry[]} */
         const results = [];
         for (let i = 0, ii = rowLists.length; i < ii; ++i) {
-            /** @type {{id: number, row: import('hoshidicts').TermRow}[]} */
-            const termRows = [];
-            /** @type {{id: number, row: import('hoshidicts').TermRow}[]} */
-            const readingRows = [];
-            for (const row of rowLists[i]) {
-                if (!enabled.has(row.dict_name)) { continue; }
-                const id = this._getTermId(row);
-                if (id === null) { continue; }
-                (row.reading_match ? readingRows : termRows).push({id, row});
-            }
             // As an index of expressions followed by one of readings would find them.
-            for (const rows of [termRows, readingRows]) {
-                rows.sort((a, b) => a.id - b.id);
-                for (const {id, row} of rows) {
+            for (const readingMatch of [false, true]) {
+                for (const {id, row} of this._getRowsById(rowLists[i], (item) => item.reading_match === readingMatch && enabled.has(item.dict_name))) {
                     if (visited.has(id)) { continue; }
                     visited.add(id);
-                    results.push(this._createTerm(row, id, row.reading_match ? 'reading' : 'term', i));
+                    results.push(this._createTerm(row, id, readingMatch ? 'reading' : 'term', i));
                 }
             }
         }
@@ -194,14 +174,7 @@ export class DictionaryDatabaseEngine {
         const results = [];
         for (let i = 0, ii = rowLists.length; i < ii; ++i) {
             const {term, reading} = termList[i];
-            const rows = [];
-            for (const row of rowLists[i]) {
-                if (row.expression !== term || row.reading !== reading || !enabled.has(row.dict_name)) { continue; }
-                const id = this._getTermId(row);
-                if (id !== null) { rows.push({id, row}); }
-            }
-            rows.sort((a, b) => a.id - b.id);
-            for (const {id, row} of rows) {
+            for (const {id, row} of this._getRowsById(rowLists[i], (item) => item.expression === term && item.reading === reading && enabled.has(item.dict_name))) {
                 results.push(this._createTerm(row, id, 'term', i));
             }
         }
@@ -218,13 +191,7 @@ export class DictionaryDatabaseEngine {
         /** @type {import('dictionary-database').TermEntry[]} */
         const results = [];
         for (let i = 0, ii = rowLists.length; i < ii; ++i) {
-            const rows = [];
-            for (const row of rowLists[i]) {
-                const id = this._getTermId(row);
-                if (id !== null) { rows.push({id, row}); }
-            }
-            rows.sort((a, b) => a.id - b.id);
-            for (const {id, row} of rows) {
+            for (const {id, row} of this._getRowsById(rowLists[i], () => true)) {
                 results.push(this._createTerm(row, id, 'sequence', i));
             }
         }
@@ -328,16 +295,6 @@ export class DictionaryDatabaseEngine {
     async findTagMetaBulk(items) {
         await this._ensurePrepared();
         return items.map(({query, dictionary}) => this._dictionaryMap.get(dictionary)?.tags.get(`${query}`));
-    }
-
-    /**
-     * @param {string} name
-     * @param {string} dictionary
-     * @returns {Promise<?import('dictionary-database').Tag>}
-     */
-    async findTagForTitle(name, dictionary) {
-        await this._ensurePrepared();
-        return this._dictionaryMap.get(dictionary)?.tags.get(name) ?? null;
     }
 
     /**
@@ -564,7 +521,7 @@ export class DictionaryDatabaseEngine {
                 const mount = await this._storage.mount(hoshidicts, id, path);
                 mount();
                 this._mounted.set(id, path);
-                if (!hoshidicts.add(path, true)) {
+                if (!hoshidicts.add(path)) {
                     throw new Error('hoshidicts could not open it');
                 }
             } catch (e) {
@@ -603,6 +560,24 @@ export class DictionaryDatabaseEngine {
     }
 
     /**
+     * Gives the rows that the filter keeps, with their ids, in the order of the ids, as an index would find them.
+     * Rows of dictionaries that are not mounted are left out.
+     * @param {import('hoshidicts').TermRow[]} rows
+     * @param {(row: import('hoshidicts').TermRow) => boolean} filter
+     * @returns {{id: number, row: import('hoshidicts').TermRow}[]}
+     */
+    _getRowsById(rows, filter) {
+        /** @type {{id: number, row: import('hoshidicts').TermRow}[]} */
+        const results = [];
+        for (const row of rows) {
+            if (!filter(row)) { continue; }
+            const id = this._getTermId(row);
+            if (id !== null) { results.push({id, row}); }
+        }
+        return results.sort((a, b) => a.id - b.id);
+    }
+
+    /**
      * Creates a term entry whose glossary content is left to `findTermGlossariesBulk`.
      * @param {import('hoshidicts').TermRow} row
      * @param {number} id
@@ -613,7 +588,6 @@ export class DictionaryDatabaseEngine {
     _createTerm(row, id, matchSource, index) {
         return {
             index,
-            matchType: 'exact',
             matchSource,
             term: row.expression,
             reading: row.reading,

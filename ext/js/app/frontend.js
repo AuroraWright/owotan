@@ -802,7 +802,6 @@ export class Frontend {
             params: {
                 type,
                 query,
-                wildcards: 'off',
             },
             state: detailsState,
             content: detailsContent,

@@ -298,7 +298,7 @@ class DictionaryEntry {
 
     /** */
     _showDetails() {
-        const {title, revision, version, counts, prefixWildcardsSupported} = this._dictionaryInfo;
+        const {title, revision, version, counts} = this._dictionaryInfo;
 
         const modal = this._dictionaryController.modalController.getModal('dictionary-details');
         if (modal === null) { return; }
@@ -309,8 +309,6 @@ class DictionaryEntry {
         const versionElement = querySelectorNotNull(modal.node, '.dictionary-revision');
         /** @type {HTMLElement} */
         const outdateElement = querySelectorNotNull(modal.node, '.dictionary-outdated-notification');
-        /** @type {HTMLInputElement} */
-        const wildcardSupportedElement = querySelectorNotNull(modal.node, '.dictionary-prefix-wildcard-searches-supported');
         /** @type {HTMLElement} */
         const detailsTableElement = querySelectorNotNull(modal.node, '.dictionary-details-table');
         /** @type {HTMLElement} */
@@ -325,7 +323,6 @@ class DictionaryEntry {
         titleElement.textContent = title;
         versionElement.textContent = `rev.${revision}`;
         outdateElement.hidden = (version >= 3);
-        wildcardSupportedElement.checked = prefixWildcardsSupported;
         partsOfSpeechFilterSetting.hidden = !counts?.terms.total;
         partsOfSpeechFilterToggle.dataset.setting = `dictionaries[${this._index}].partsOfSpeechFilter`;
 
@@ -357,7 +354,6 @@ class DictionaryEntry {
             tagMeta: 'Tag Count',
             media: 'Media Count',
             frequencyMode: 'Frequency Mode',
-            prefixWildcardsSupported: 'Prefix Wildcards Enabled',
             importSuccess: 'Import Success',
         };
 
@@ -1332,17 +1328,12 @@ export class DictionaryController {
         const statusFooter = this._statusFooter;
         const progressSelector = '.dictionary-delete-progress';
         const progressContainers = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(`#dictionaries-modal ${progressSelector}`));
-        const progressBars = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(`${progressSelector} .progress-bar`));
         const infoLabels = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(`${progressSelector} .progress-info`));
-        const statusLabels = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(`${progressSelector} .progress-status`));
         const prevention = this._settingsController.preventPageExit();
         try {
             this._setButtonsEnabled(false);
 
-            // Deleting a dictionary's files is quick, so there is no progress to show.
-            for (const progressBar of progressBars) { progressBar.style.width = '0%'; }
-            for (const label of statusLabels) { label.textContent = ''; }
-
+            // Deleting a dictionary's files is quick, so there is no progress to show, only that it is deleting.
             for (const progress of progressContainers) { progress.hidden = false; }
             for (const label of infoLabels) { label.textContent = 'Deleting dictionary...'; }
             if (statusFooter !== null) { statusFooter.setTaskActive(progressSelector, true); }

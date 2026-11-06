@@ -128,11 +128,10 @@ export class DictionaryDatabase {
     /**
      * @param {string[]} termList
      * @param {import('dictionary-database').DictionarySet} dictionaries
-     * @param {import('dictionary-database').MatchType} matchType
      * @returns {Promise<import('dictionary-database').TermEntry[]>}
      */
-    findTermsBulk(termList, dictionaries, matchType) {
-        return this._call('findTermsBulk', termList, [...dictionaries.keys()], matchType);
+    findTermsBulk(termList, dictionaries) {
+        return this._call('findTermsBulk', termList, [...dictionaries.keys()]);
     }
 
     /**
@@ -194,15 +193,6 @@ export class DictionaryDatabase {
      */
     findTagMetaBulk(items) {
         return this._call('findTagMetaBulk', items);
-    }
-
-    /**
-     * @param {string} name
-     * @param {string} dictionary
-     * @returns {Promise<?import('dictionary-database').Tag>}
-     */
-    findTagForTitle(name, dictionary) {
-        return this._call('findTagForTitle', name, dictionary);
     }
 
     /**

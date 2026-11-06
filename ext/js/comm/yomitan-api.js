@@ -29,6 +29,7 @@ import {getDynamicTemplates} from '../data/anki-template-util.js';
 import {mediaFileNameHashOrTimestamp} from '../data/anki-util.js';
 import {getLanguageSummaries} from '../language/languages.js';
 import {AudioDownloader} from '../media/audio-downloader.js';
+import {isSafariExtension} from '../extension/app-extension.js';
 import {getFileExtensionFromAudioMediaType, getFileExtensionFromImageMediaType} from '../media/media-util.js';
 import {getDictionaryEntryMedia} from '../pages/settings/anki-deck-generator-controller.js';
 import {AnkiTemplateRenderer} from '../templates/anki-template-renderer.js';
@@ -617,10 +618,10 @@ export class YomitanApi {
      */
     async _setupPort() {
         // Safari's extensions cannot reach native components other than their app's, so on macOS that app serves the API.
-        if (chrome.runtime.getURL('/').startsWith('safari-web-extension:')) {
+        if (isSafariExtension()) {
+            // The connection keeps reaching the app until it is disconnected, so it never reports being disconnected.
             const port = new YomitanApiAppConnection(this._serverUrl);
             this._eventListeners.addListener(port.onMessage, this._onMessage.bind(this));
-            this._eventListeners.addListener(port.onDisconnect, this._onDisconnect.bind(this));
             this._port = port;
             port.start();
             return;

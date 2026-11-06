@@ -361,7 +361,6 @@ function createProfileOptionsUpdatedTestData1() {
             enableSearchTags: false,
             layoutAwareScan: false,
             hideDelay: 0,
-            matchTypePrefix: false,
             hidePopupOnCursorExit: false,
             hidePopupOnCursorExitDelay: 0,
             reducedMotionScrolling: false,
@@ -707,11 +706,8 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 77,
+        version: 78,
         global: {
-            database: {
-                prefixWildcardsSupported: false,
-            },
             dataTransmissionConsentShown: false,
         },
     };

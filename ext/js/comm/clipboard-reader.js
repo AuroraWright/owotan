@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {sendAppExtensionMessage} from '../extension/app-extension.js';
 import {getFileExtensionFromImageMediaType} from '../media/media-util.js';
 
 /**
@@ -77,7 +78,9 @@ export class ClipboardReader {
               non-extension permission for clipboard access.
         */
         if (this._browser === 'safari') {
-            const {text} = await this._sendSafariNativeMessage('getClipboardText');
+            // Safari does not let extensions read the clipboard, so on macOS the app extension that holds this one
+            // reads it. On iOS it cannot, and always answers that the clipboard is empty.
+            const {text} = await sendAppExtensionMessage({action: 'getClipboardText'}, 'Cannot read clipboard');
             return typeof text === 'string' ? text : '';
         }
 
@@ -121,7 +124,7 @@ export class ClipboardReader {
     async getImage() {
         // See browser-specific notes in getText
         if (this._browser === 'safari') {
-            const {image} = await this._sendSafariNativeMessage('getClipboardImage');
+            const {image} = await sendAppExtensionMessage({action: 'getClipboardImage'}, 'Cannot read clipboard');
             return typeof image === 'string' ? image : null;
         }
 
@@ -168,27 +171,6 @@ export class ClipboardReader {
     }
 
     // Private
-
-    /**
-     * Safari does not let extensions read the clipboard, so the app extension that holds this one reads it.
-     * @param {string} action
-     * @returns {Promise<{[key: string]: unknown}>}
-     */
-    _sendSafariNativeMessage(action) {
-        return new Promise((resolve, reject) => {
-            // Safari sends native messages to the app extension whichever application is named.
-            chrome.runtime.sendNativeMessage('application.id', {action}, (/** @type {unknown} */ response) => {
-                const error = chrome.runtime.lastError;
-                if (error) {
-                    reject(new Error(`Cannot read clipboard: ${error.message}`));
-                } else if (typeof response !== 'object' || response === null || 'error' in response) {
-                    reject(new Error('Cannot read clipboard'));
-                } else {
-                    resolve(/** @type {{[key: string]: unknown}} */ (response));
-                }
-            });
-        });
-    }
 
     /**
      * @returns {boolean}

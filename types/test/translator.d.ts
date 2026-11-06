@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import type {FindTermsMatchType, FindTermsSortOrder, FindKanjiDictionary, FindTermDictionary} from '../ext/translation';
+import type {FindTermsSortOrder, FindKanjiDictionary, FindTermDictionary} from '../ext/translation';
 import type {SearchResolution} from '../ext/settings';
 import type {FindTermsMode} from 'translator';
 import type {DictionaryEntry} from 'dictionary';
@@ -38,7 +38,6 @@ export type FindKanjiOptionsPreset = {
 
 export type FindTermsOptionsPreset = {
     type: 'terms';
-    matchType?: FindTermsMatchType;
     deinflect?: boolean;
     mainDictionary?: string;
     sortFrequencyDictionary?: string | null;

@@ -463,7 +463,9 @@
                 "js/background/offscreen.js",
                 "js/background/offscreen-main.js",
                 "lib/hoshidicts-threads.js",
-                "lib/hoshidicts-threads.wasm"
+                "lib/hoshidicts-threads.wasm",
+                "js/comm/shared-worker-bridge.js",
+                "js/display/media-drawing-worker.js"
             ]
         },
         {

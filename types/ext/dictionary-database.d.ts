@@ -29,8 +29,6 @@ export type MediaDataBase<TContentType = unknown> = {
     content: TContentType;
 };
 
-export type MediaDataArrayBufferContent = MediaDataBase<ArrayBuffer>;
-
 export type MediaDataStringContent = MediaDataBase<string>;
 
 type MediaType = ArrayBuffer | string | null;
@@ -41,20 +39,16 @@ export type DrawMedia<T extends MediaType = ArrayBuffer> = {index: number} & Med
 
 export type TermEntry = {
     index: number;
-    matchType: MatchType;
     matchSource: MatchSource;
     term: string;
     reading: string;
     definitionTags: string[];
     termTags: string[];
     rules: string[];
-    definitions: DictionaryData.TermGlossary[];
-    /**
-     * Set when the database has not loaded the row's glossary content: `definitions` then holds only
-     * the deinflection definitions, and this is the number of other definitions, which
-     * `findTermGlossariesBulk` loads.
-     */
-    deferredDefinitionCount?: number;
+    /** The deinflection definitions. The others are loaded with `findTermGlossariesBulk`. */
+    definitions: DictionaryData.TermGlossaryDeinflection[];
+    /** The number of the definitions that are not deinflection definitions. */
+    deferredDefinitionCount: number;
     score: number;
     dictionary: string;
     id: number;
@@ -79,11 +73,6 @@ export type Tag = {
     notes: string;
     score: number;
     dictionary: string;
-};
-
-export type TermMetaFrequencyDataWithReading = {
-    reading: string;
-    frequency: DictionaryData.GenericFrequencyData;
 };
 
 export type TermMeta = TermMetaFrequency | TermMetaPitch | TermMetaPhoneticData;
@@ -134,8 +123,6 @@ export type DictionaryCounts = {
 export type DictionaryCountGroup = {
     [key: string]: number;
 };
-
-export type MatchType = Dictionary.TermSourceMatchType;
 
 export type MatchSource = Dictionary.TermSourceMatchSource;
 

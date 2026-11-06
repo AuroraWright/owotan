@@ -5,7 +5,7 @@ project(yomitan_hoshidicts LANGUAGES C CXX)
 # hoshidicts source.
 set(HOSHIDICTS_SOURCE_DIR "" CACHE PATH "The patched hoshidicts checkout")
 # The threaded build imports dictionaries on up to 8 threads. It needs a
-# cross-origin isolated page and is used only to import.
+# cross-origin isolated context, where lookups use it too, with no threads.
 option(YOMITAN_HOSHIDICTS_THREADS "Build hoshidicts-threads, with threads" OFF)
 if(NOT EMSCRIPTEN)
   message(FATAL_ERROR "Configure with emcmake")

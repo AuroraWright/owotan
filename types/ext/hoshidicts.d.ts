@@ -25,7 +25,6 @@ export type FileSystem = {
     readFile(path: string): Uint8Array;
     writeFile(path: string, data: Uint8Array): void;
     unlink(path: string): void;
-    analyzePath(path: string): {exists: boolean};
     isDir(mode: number): boolean;
     stat(path: string): {mode: number, size: number};
     mount(type: unknown, options: unknown, mountPoint: string): void;
@@ -45,9 +44,6 @@ export type CreateModule = (options?: Record<string, unknown>) => Promise<Module
 
 export type ImportReport = {
     success: boolean;
-    title: string;
-    /** The directory the dictionary was written to. */
-    directory: string;
     /** Begins with `invalid data` when a bank does not hold the rows its name promises. */
     error: string;
     counts: {

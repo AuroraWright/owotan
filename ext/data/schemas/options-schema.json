@@ -505,7 +505,6 @@
                                     "enableOnSearchPage",
                                     "enableSearchTags",
                                     "layoutAwareScan",
-                                    "matchTypePrefix",
                                     "hidePopupOnCursorExit",
                                     "hidePopupOnCursorExitDelay",
                                     "reducedMotionScrolling",
@@ -807,10 +806,6 @@
                                     "layoutAwareScan": {
                                         "type": "boolean",
                                         "default": true
-                                    },
-                                    "matchTypePrefix": {
-                                        "type": "boolean",
-                                        "default": false
                                     },
                                     "hidePopupOnCursorExit": {
                                         "type": "boolean",
@@ -1399,22 +1394,9 @@
         "global": {
             "type": "object",
             "required": [
-                "database",
                 "dataTransmissionConsentShown"
             ],
             "properties": {
-                "database": {
-                    "type": "object",
-                    "required": [
-                        "prefixWildcardsSupported"
-                    ],
-                    "properties": {
-                        "prefixWildcardsSupported": {
-                            "type": "boolean",
-                            "default": false
-                        }
-                    }
-                },
                 "dataTransmissionConsentShown": {
                     "type": "boolean",
                     "default": false

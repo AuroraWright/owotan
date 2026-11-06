@@ -91,18 +91,11 @@ export class AudioSystem extends EventDispatcher {
             return NativeAudio.fromData(this._api, data);
         }
 
-        // Audio on this device or its local network is downloaded by the background page and played from its data.
-        // Chrome asks for local network access for an audio element's request, and on iOS an audio element plays
-        // nothing from the local network, while requests from the background page reach it in both.
-        if (isLocalNetworkUrl(url) && this._api) {
-            /** @type {{data: string, contentType: string}|null} */
-            const response = await this._api.fetchLocalAudioData(url);
-
-            if (!response) {
-                throw new Error('Failed to fetch local audio from background context');
-            }
-
-            url = `data:${response.contentType || 'audio/mpeg'};base64,${response.data}`;
+        // Audio on this device or its local network is downloaded by the background page and played from its data,
+        // as Chrome asks for local network access for an audio element's request but not for the background page's.
+        if (isLocalNetworkUrl(url) && this._api !== null) {
+            const {data, contentType} = await this._api.downloadAudio(url, sourceType);
+            url = `data:${contentType ?? 'audio/mpeg'};base64,${data}`;
         }
 
         const audio = new Audio(url);

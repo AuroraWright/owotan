@@ -118,7 +118,6 @@ export function createFindTermsOptions(dictionaryName, optionsPresets, optionsAr
     }
 
     const {
-        matchType,
         deinflect,
         mainDictionary,
         sortFrequencyDictionary,
@@ -131,7 +130,6 @@ export function createFindTermsOptions(dictionaryName, optionsPresets, optionsAr
     } = preset;
 
     return {
-        matchType: typeof matchType !== 'undefined' ? matchType : 'exact',
         deinflect: typeof deinflect !== 'undefined' ? deinflect : true,
         mainDictionary: typeof mainDictionary !== 'undefined' && mainDictionary !== placeholder ? mainDictionary : dictionaryName,
         sortFrequencyDictionary: typeof sortFrequencyDictionary !== 'undefined' ? sortFrequencyDictionary : null,

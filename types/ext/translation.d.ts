@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import type * as Dictionary from './dictionary';
 import type {SearchResolution} from 'settings';
 
 // Kanji
@@ -56,10 +55,6 @@ export type FindKanjiDictionary = {
  * An options object for use with `Translator.findTerms`.
  */
 export type FindTermsOptions = {
-    /**
-     * The matching type for looking up terms.
-     */
-    matchType: FindTermsMatchType;
     /**
      * Whether or not deinflection should be performed.
      */
@@ -110,11 +105,6 @@ export type FindTermsOptions = {
      */
     useAllFrequencyDictionaries: boolean;
 };
-
-/**
- * The matching type for looking up terms.
- */
-export type FindTermsMatchType = Dictionary.TermSourceMatchType;
 
 /**
  * A sorting order to use when finding terms.

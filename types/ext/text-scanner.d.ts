@@ -42,7 +42,6 @@ export type Options = {
     preventMiddleMouseOnTextHover?: boolean;
     preventBackForwardOnPage?: boolean;
     preventBackForwardOnTextHover?: boolean;
-    matchTypePrefix?: boolean;
     sentenceParsingOptions?: SentenceParsingOptions;
     scanWithoutMousemove?: boolean;
     scanResolution?: string;

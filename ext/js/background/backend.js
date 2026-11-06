@@ -33,6 +33,7 @@ import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
 import {DictionaryDatabase} from '../dictionary/dictionary-database.js';
+import {sendAppExtensionMessage} from '../extension/app-extension.js';
 import {Environment} from '../extension/environment.js';
 import {CacheMap} from '../general/cache-map.js';
 import {ObjectPropertyAccessor} from '../general/object-property-accessor.js';
@@ -197,7 +198,6 @@ export class Backend {
             ['getLanguageSummaries',         this._onApiGetLanguageSummaries.bind(this)],
             ['heartbeat',                    this._onApiHeartbeat.bind(this)],
             ['forceSync',                    this._onApiForceSync.bind(this)],
-            ['fetchLocalAudioData',          this._onApiFetchLocalAudioData.bind(this)],
             ['downloadAudio',                this._onApiDownloadAudio.bind(this)],
             ['playNativeAudio',              this._onApiPlayNativeAudio.bind(this)],
             ['stopNativeAudio',              this._onApiStopNativeAudio.bind(this)],
@@ -1235,65 +1235,21 @@ export class Backend {
         return void 0;
     }
 
-    /** @type {import('api').ApiHandler<'fetchLocalAudioData'>} */
-    async _onApiFetchLocalAudioData({url}) {
-        const response = await fetch(url);
-        if (!response.ok) {
-            log.error(`Local server responded with HTTP status code ${response.status}`);
-            return null;
-        }
-
-        const contentType = response.headers.get('content-type') || 'audio/mpeg';
-        const arrayBuffer = await response.arrayBuffer();
-
-        let binary = '';
-        const bytes = new Uint8Array(arrayBuffer);
-        for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-
-        return {
-            data: btoa(binary),
-            contentType: contentType,
-        };
-    }
-
     /** @type {import('api').ApiHandler<'downloadAudio'>} */
     async _onApiDownloadAudio({url, sourceType}) {
         return await this._audioDownloader.downloadAudio(url, sourceType);
     }
 
+    // Safari plays audio in a page only after a gesture in it, so the app extension that holds this one plays it.
+
     /** @type {import('api').ApiHandler<'playNativeAudio'>} */
     async _onApiPlayNativeAudio({id, data, volume}) {
-        await this._sendNativeAudioMessage({action: 'playAudio', id, data, volume});
+        await sendAppExtensionMessage({action: 'playAudio', id, data, volume}, 'Cannot play audio');
     }
 
     /** @type {import('api').ApiHandler<'stopNativeAudio'>} */
     async _onApiStopNativeAudio({id}) {
-        await this._sendNativeAudioMessage({action: 'stopAudio', id});
-    }
-
-    /**
-     * Safari plays audio in a page only after a gesture in it, so the app extension that holds this one plays it.
-     * @param {{[key: string]: string|number}} message
-     * @returns {Promise<{[key: string]: unknown}>}
-     */
-    _sendNativeAudioMessage(message) {
-        return new Promise((resolve, reject) => {
-            // Safari sends native messages to the app extension whichever application is named.
-            chrome.runtime.sendNativeMessage('application.id', message, (/** @type {unknown} */ response) => {
-                const error = chrome.runtime.lastError;
-                if (error) {
-                    reject(new Error(`Cannot play audio: ${error.message}`));
-                } else if (typeof response !== 'object' || response === null) {
-                    reject(new Error('Cannot play audio'));
-                } else if ('error' in response) {
-                    reject(new Error(String(response.error)));
-                } else {
-                    resolve(/** @type {{[key: string]: unknown}} */ (response));
-                }
-            });
-        });
+        await sendAppExtensionMessage({action: 'stopAudio', id}, 'Cannot stop audio');
     }
 
     // Command handlers
@@ -1854,7 +1810,7 @@ export class Backend {
         const options = this._getProfileOptions(optionsContext, false);
 
         /** @type {import('api').FindTermsDetails} */
-        const details = {matchType: 'exact', deinflect: true};
+        const details = {deinflect: true};
         const findTermsOptions = this._getTranslatorFindTermsOptions(mode, details, options);
         if (useAllFrequencyDictionaries) { findTermsOptions.useAllFrequencyDictionaries = true; }
         /** @type {import('api').ParseTextLine[]} */
@@ -1896,7 +1852,6 @@ export class Backend {
                                 for (const src of headword.sources) {
                                     if (src.originalText !== token) { continue; }
                                     if (!src.isPrimary) { continue; }
-                                    if (src.matchType !== 'exact') { continue; }
                                     validSources.push(src);
                                 }
                                 if (validSources.length > 0) {
@@ -2386,14 +2341,6 @@ export class Backend {
                 }, timeout);
             }
         });
-    }
-
-    /**
-     * @template {import('application').ApiNames} TName
-     * @param {import('application').ApiMessage<TName>} message
-     */
-    _sendMessageIgnoreResponse(message) {
-        this._webExtension.sendMessageIgnoreResponse(message);
     }
 
     /**
@@ -2898,8 +2845,7 @@ export class Backend {
      * @returns {import('translation').FindTermsOptions} An options object.
      */
     _getTranslatorFindTermsOptions(mode, details, options) {
-        let {matchType, deinflect, primaryReading} = details;
-        if (typeof matchType !== 'string') { matchType = /** @type {import('translation').FindTermsMatchType} */ ('exact'); }
+        let {deinflect, primaryReading} = details;
         if (typeof deinflect !== 'boolean') { deinflect = true; }
         if (typeof primaryReading !== 'string') { primaryReading = ''; }
         const enabledDictionaryMap = this._getTranslatorEnabledDictionaryMap(options);
@@ -2925,7 +2871,6 @@ export class Backend {
             excludeDictionaryDefinitions.add(mainDictionary);
         }
         return {
-            matchType,
             deinflect,
             primaryReading,
             mainDictionary,

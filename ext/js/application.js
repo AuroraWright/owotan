@@ -22,6 +22,7 @@ import {createApiMap, invokeApiMapHandler} from './core/api-map.js';
 import {EventDispatcher} from './core/event-dispatcher.js';
 import {ExtensionError} from './core/extension-error.js';
 import {log} from './core/log.js';
+import {isSafariExtension} from './extension/app-extension.js';
 import {WebExtension} from './extension/web-extension.js';
 
 /**
@@ -189,7 +190,7 @@ export class Application extends EventDispatcher {
         // Safari gives each site its own SharedWorker, so a popup in a website would not reach the backend through
         // one, and Safari on macOS ends any extension page that creates one. So in Safari, pages don't use the
         // media drawing worker, which reaches the database through the backend, and draw images themselves.
-        const isSafari = new URL(import.meta.url).protocol === 'safari-web-extension:';
+        const isSafari = isSafariExtension();
         /** @type {MessagePort | null} */
         // If the backend isn't a service worker, we can't postMessage to it,
         // so we temporarily create a SharedWorker in order to establish a MessageChannel

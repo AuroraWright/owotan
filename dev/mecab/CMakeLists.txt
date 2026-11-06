@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 project(yomitan_mecab LANGUAGES CXX)
 
 # Configured by dev/bin/build-mecab.js, which checks out the MeCab source.
-# Builds MeCab's library, which ext/js/comm/mecab-worker.js runs in browsers
+# Builds MeCab's library, which ext/js/comm/mecab-worker-main.js runs in browsers
 # whose extensions cannot reach the native MeCab component, such as Safari.
 set(MECAB_SOURCE_DIR "" CACHE PATH "The MeCab checkout")
 if(NOT EMSCRIPTEN)

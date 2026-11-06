@@ -39,8 +39,8 @@ export class Hoshidicts {
         const {cwrap} = module;
         /** @type {(archivePath: string, outputDirectory: string) => string} */
         this._import = cwrap('yh_import', 'string', ['string', 'string']);
-        /** @type {(path: string, paged: number) => number} */
-        this._add = cwrap('yh_add', 'number', ['string', 'number']);
+        /** @type {(path: string) => number} */
+        this._add = cwrap('yh_add', 'number', ['string']);
         /** @type {(path: string) => void} */
         this._remove = cwrap('yh_remove', null, ['string']);
         /** @type {(request: string) => number} */
@@ -102,13 +102,12 @@ export class Hoshidicts {
     }
 
     /**
-     * Loads the dictionary at `path` for every kind of query.
+     * Loads the dictionary at `path` for every kind of query. Its entries are read from the files on demand.
      * @param {string} path
-     * @param {boolean} paged Whether entries are read from the files on demand rather than copied into memory.
      * @returns {boolean}
      */
-    add(path, paged) {
-        return this._add(path, paged ? 1 : 0) !== 0;
+    add(path) {
+        return this._add(path) !== 0;
     }
 
     /**

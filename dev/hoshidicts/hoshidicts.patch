@@ -41,7 +41,7 @@ index c61d2f7..7583ba5 100644
  
  namespace dictionary_importer {
 diff --git a/include/hoshidicts/query.hpp b/include/hoshidicts/query.hpp
-index dba519f..a7f3ed9 100644
+index dba519f..1a3759f 100644
 --- a/include/hoshidicts/query.hpp
 +++ b/include/hoshidicts/query.hpp
 @@ -1,6 +1,7 @@
@@ -52,7 +52,7 @@ index dba519f..a7f3ed9 100644
  #include <memory>
  #include <optional>
  #include <span>
-@@ -94,6 +95,52 @@ struct KanjiResult {
+@@ -94,6 +95,49 @@ struct KanjiResult {
    std::vector<FrequencyEntry> frequencies;
  };
  
@@ -61,8 +61,8 @@ index dba519f..a7f3ed9 100644
 +  std::vector<std::string> rules;
 +};
 +
-+// One term-bank row, as Yomitan's IndexedDB `terms` store holds it. `offset`
-+// identifies the row within its dictionary (query_glossary takes it).
++// One term-bank row, without its glossary, which query_glossary reads. `offset`
++// identifies the row within its dictionary.
 +struct TermRow {
 +  std::string dict_name;
 +  std::string expression;
@@ -72,13 +72,10 @@ index dba519f..a7f3ed9 100644
 +  std::string term_tags;
 +  double score = 0;
 +  std::vector<TermRedirect> redirects;
-+  // The glossary's items other than redirects; -1 when the dictionary was
-+  // imported before this was stored.
-+  int32_t content_count = -1;
-+  // The row's sequence; -1 when the dictionary was imported before it was stored.
++  // The glossary's items other than redirects.
++  int32_t content_count = 0;
++  // The row's sequence; -1 when it has none.
 +  int64_t sequence = -1;
-+  // Empty unless asked for.
-+  std::string glossary;
 +  uint64_t offset = 0;
 +  bool reading_match = false;
 +};
@@ -105,15 +102,16 @@ index dba519f..a7f3ed9 100644
  struct RawTerm;
  struct RawTerms;
  struct BlobPins;
-@@ -190,6 +237,14 @@ class DictionaryQuery {
+@@ -190,6 +234,15 @@ class DictionaryQuery {
    KanjiResult query_kanji(const std::string& kanji, std::span<const std::string> dictionaries) const;
  
    std::vector<TermResult> query(const std::string& expression) const;
-+  std::vector<TermRow> query_rows(const std::string& key, bool with_glossary = true) const;
++  // The rows of term dictionaries of version 7 or later, which hold all that a
++  // row has, whose expression or reading is `key`.
++  std::vector<TermRow> query_rows(const std::string& key) const;
 +  std::optional<std::string> query_glossary(const std::string& dict_name, uint64_t offset) const;
-+  // The rows a sequenced term dictionary files under `sequence`.
-+  std::vector<TermRow> query_sequence_rows(const std::string& dict_name, int64_t sequence,
-+                                           bool with_glossary = true) const;
++  // The rows a sequenced term dictionary of version 7 or later files under `sequence`.
++  std::vector<TermRow> query_sequence_rows(const std::string& dict_name, int64_t sequence) const;
 +  std::vector<MetaRow> query_meta_rows(const std::string& key) const;
 +  std::vector<KanjiRow> query_kanji_rows(const std::string& character) const;
 +  std::vector<MetaRow> query_kanji_meta_rows(const std::string& character) const;
@@ -915,7 +913,7 @@ index 7e4a7b4..26e366c 100644
  bool parse_ipa(std::string_view content, ParsedPitch& out);
  };
 diff --git a/src/query.cpp b/src/query.cpp
-index 6df3c68..10c751c 100644
+index 6df3c68..609c73e 100644
 --- a/src/query.cpp
 +++ b/src/query.cpp
 @@ -318,7 +318,9 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
@@ -949,78 +947,58 @@ index 6df3c68..10c751c 100644
  
          double score = 0;
          if (data->version >= 5) {
-@@ -1196,3 +1202,273 @@ bool DictionaryQuery::hash_index_paged(const std::string& path) const {
+@@ -1196,3 +1202,240 @@ bool DictionaryQuery::hash_index_paged(const std::string& path) const {
    const auto* dict = find_loaded(path);
    return dict && dict->data->table.paged();
  }
 +
 +namespace {
-+struct RecordGlossary {
-+  uint64_t offset;
-+  uint32_t size;
-+};
-+
-+// Reads a term record's fields after the glossary span, through the score.
-+template <typename Reader>
-+void read_term_tail(Reader& blob, int version, TermRow& row) {
-+  row.definition_tags = blob.str(read_value<uint8_t>(blob));
-+  row.rules = blob.str(read_value<uint8_t>(blob));
-+  row.term_tags = blob.str(read_value<uint8_t>(blob));
-+  if (version >= 2) {
-+    auto redirect_count = read_value<uint32_t>(blob);
-+    for (uint32_t r = 0; r < redirect_count; r++) {
-+      TermRedirect& redirect = row.redirects.emplace_back();
-+      redirect.form_of = blob.str(read_value<uint32_t>(blob));
-+      auto rule_count = read_value<uint32_t>(blob);
-+      for (uint32_t j = 0; j < rule_count; j++) {
-+        redirect.rules.emplace_back(blob.str(read_value<uint32_t>(blob)));
-+      }
-+    }
-+  }
-+  // Before version 7 neither was stored; such a record's glossary is
-+  // decompressed by whoever needs the count.
-+  if (version >= 7) {
-+    row.content_count = read_value<uint16_t>(blob);
-+    row.sequence = read_value<int64_t>(blob);
-+  }
-+  if (version >= 5) {
-+    row.score = read_value<double>(blob);
-+  } else if (version >= 3) {
-+    row.score = read_value<int32_t>(blob);
-+  }
-+}
-+
-+// Appends the term record at `offset` to `rows` when `accept` takes its
-+// expression and reading, and returns where its compressed glossary is.
++// Appends the term record at `offset`, of version 7 or later, to `rows` when
++// `accept` takes its expression and reading, and returns whether it did.
 +template <typename Open, typename Accept>
-+std::optional<RecordGlossary> read_term_row(Open& open, uint64_t offset, const std::string& dict_name, int version,
-+                                            Accept&& accept, std::vector<TermRow>& rows) {
++bool read_term_row(Open& open, uint64_t offset, const std::string& dict_name, Accept&& accept,
++                   std::vector<TermRow>& rows) {
 +  auto blob = open(offset);
 +  if (read_value<uint8_t>(blob) != 0) {
-+    return std::nullopt;
++    return false;
 +  }
 +  std::string_view expr = blob.str(read_value<uint16_t>(blob));
 +  std::string_view reading = blob.str(read_value<uint16_t>(blob));
 +  if (!accept(expr, reading)) {
-+    return std::nullopt;
++    return false;
 +  }
-+  RecordGlossary glossary{.offset = read_value<uint64_t>(blob), .size = read_value<uint32_t>(blob)};
++  // The glossary's offset and size, which query_glossary reads.
++  blob.skip(sizeof(uint64_t) + sizeof(uint32_t));
 +  TermRow& row = rows.emplace_back();
 +  row.dict_name = dict_name;
 +  row.expression = expr;
 +  row.reading = reading;
 +  row.offset = offset;
-+  read_term_tail(blob, version, row);
-+  return glossary;
++  row.definition_tags = blob.str(read_value<uint8_t>(blob));
++  row.rules = blob.str(read_value<uint8_t>(blob));
++  row.term_tags = blob.str(read_value<uint8_t>(blob));
++  auto redirect_count = read_value<uint32_t>(blob);
++  for (uint32_t r = 0; r < redirect_count; r++) {
++    TermRedirect& redirect = row.redirects.emplace_back();
++    redirect.form_of = blob.str(read_value<uint32_t>(blob));
++    auto rule_count = read_value<uint32_t>(blob);
++    for (uint32_t j = 0; j < rule_count; j++) {
++      redirect.rules.emplace_back(blob.str(read_value<uint32_t>(blob)));
++    }
++  }
++  row.content_count = read_value<uint16_t>(blob);
++  row.sequence = read_value<int64_t>(blob);
++  row.score = read_value<double>(blob);
++  return true;
 +}
 +}  // namespace
 +
-+std::vector<TermRow> DictionaryQuery::query_rows(const std::string& key, bool with_glossary) const {
++std::vector<TermRow> DictionaryQuery::query_rows(const std::string& key) const {
 +  std::vector<TermRow> rows;
 +  BlobPins pins;
 +  for (const auto& dict : term_dicts_) {
 +    const auto& data = dict.data;
-+    uint64_t offset_addr = data->table(key);
++    uint64_t offset_addr = data->version >= 7 ? data->table(key) : 0;
 +    if (offset_addr == 0) {
 +      continue;
 +    }
@@ -1028,17 +1006,11 @@ index 6df3c68..10c751c 100644
 +      auto index = open(offset_addr);
 +      auto count = read_value<uint32_t>(index);
 +      for (uint32_t i = 0; i < count; i++) {
-+        auto glossary = read_term_row(
-+            open, read_value<uint64_t>(index), dict.name, data->version,
-+            [&](std::string_view expr, std::string_view reading) { return expr == key || reading == key; }, rows);
-+        if (!glossary) {
-+          continue;
-+        }
-+        TermRow& row = rows.back();
-+        row.reading_match = row.expression != key;
-+        if (with_glossary) {
-+          row.glossary = decompress_glossary(data->blobs.range(glossary->offset, glossary->size, pins),
-+                                             glossary->size, data->zstd_dict);
++        if (read_term_row(
++                open, read_value<uint64_t>(index), dict.name,
++                [&](std::string_view expr, std::string_view reading) { return expr == key || reading == key; }, rows)) {
++          TermRow& row = rows.back();
++          row.reading_match = row.expression != key;
 +        }
 +      }
 +    });
@@ -1046,8 +1018,7 @@ index 6df3c68..10c751c 100644
 +  return rows;
 +}
 +
-+std::vector<TermRow> DictionaryQuery::query_sequence_rows(const std::string& dict_name, int64_t sequence,
-+                                                          bool with_glossary) const {
++std::vector<TermRow> DictionaryQuery::query_sequence_rows(const std::string& dict_name, int64_t sequence) const {
 +  std::vector<TermRow> rows;
 +  const std::string key = yomitan_parser::sequence_key(sequence);
 +  BlobPins pins;
@@ -1064,19 +1035,11 @@ index 6df3c68..10c751c 100644
 +      auto index = open(offset_addr);
 +      auto count = read_value<uint32_t>(index);
 +      for (uint32_t i = 0; i < count; i++) {
-+        auto glossary = read_term_row(open, read_value<uint64_t>(index), dict.name, data->version,
-+                                      [](std::string_view, std::string_view) { return true; }, rows);
-+        if (!glossary) {
-+          continue;
-+        }
 +        // The key's hash may be an expression's too.
-+        if (rows.back().sequence != sequence) {
++        if (read_term_row(open, read_value<uint64_t>(index), dict.name,
++                          [](std::string_view, std::string_view) { return true; }, rows) &&
++            rows.back().sequence != sequence) {
 +          rows.pop_back();
-+          continue;
-+        }
-+        if (with_glossary) {
-+          rows.back().glossary = decompress_glossary(data->blobs.range(glossary->offset, glossary->size, pins),
-+                                                     glossary->size, data->zstd_dict);
 +        }
 +      }
 +    });
@@ -1103,8 +1066,10 @@ index 6df3c68..10c751c 100644
 +      }
 +      blob.skip(read_value<uint16_t>(blob));
 +      blob.skip(read_value<uint16_t>(blob));
-+      RecordGlossary span{.offset = read_value<uint64_t>(blob), .size = read_value<uint32_t>(blob)};
-+      glossary = decompress_glossary(data->blobs.range(span.offset, span.size, pins), span.size, data->zstd_dict);
++      const auto glossary_offset = read_value<uint64_t>(blob);
++      const auto glossary_size = read_value<uint32_t>(blob);
++      glossary = decompress_glossary(data->blobs.range(glossary_offset, glossary_size, pins), glossary_size,
++                                     data->zstd_dict);
 +    });
 +    return glossary;
 +  }

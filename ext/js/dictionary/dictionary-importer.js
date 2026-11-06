@@ -96,10 +96,9 @@ export class DictionaryImporter {
             };
         }
 
-        const prefixWildcardsSupported = !!details.prefixWildcardsSupported;
         const yomitanVersion = details.yomitanVersion;
         // Throws early for an index Yomitan cannot use.
-        this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts: createEmptyCounts(), styles: '', yomitanVersion, importSuccess: false});
+        this._createSummary(dictionaryTitle, version, index, {counts: createEmptyCounts(), styles: '', yomitanVersion, importSuccess: false});
 
         // Have hoshidicts parse, check and import the banks
         this._progressNextStep(0);
@@ -126,7 +125,7 @@ export class DictionaryImporter {
             const media = await this._getImageSizes(fileMap, report.images, dictionaryTitle);
 
             return {
-                summary: this._createSummary(dictionaryTitle, version, index, {prefixWildcardsSupported, counts, styles: report.styles, yomitanVersion, importSuccess: true}),
+                summary: this._createSummary(dictionaryTitle, version, index, {counts, styles: report.styles, yomitanVersion, importSuccess: true}),
                 media,
                 tags,
             };
@@ -276,7 +275,7 @@ export class DictionaryImporter {
      */
     _createSummary(dictionaryTitle, version, index, details) {
         const indexSequenced = index.sequenced;
-        const {prefixWildcardsSupported, counts, styles, importSuccess} = details;
+        const {counts, styles, importSuccess} = details;
         /** @type {import('dictionary-importer').Summary} */
         const summary = {
             title: dictionaryTitle,
@@ -284,7 +283,6 @@ export class DictionaryImporter {
             sequenced: typeof indexSequenced === 'boolean' && indexSequenced,
             version,
             importDate: Date.now(),
-            prefixWildcardsSupported,
             counts,
             styles,
             importSuccess,

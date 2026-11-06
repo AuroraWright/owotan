@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {isSafariExtension} from '../extension/app-extension.js';
 import {getFieldMarkers} from './anki-util.js';
 
 /**
@@ -36,12 +37,12 @@ function ankiFieldMarkerMayUseClipboard(marker) {
 }
 
 /**
- * Safari has no clipboardRead permission. There the clipboard is read through the extension's app with native
- * messaging (ClipboardReader), which the extension always has, so clipboardRead stands for nativeMessaging.
+ * Safari has no clipboardRead permission. There the clipboard is read on macOS through the extension's app with
+ * native messaging (ClipboardReader), which the extension always has, so clipboardRead stands for nativeMessaging.
  * @returns {boolean}
  */
 function isClipboardReadThroughNativeMessaging() {
-    return chrome.runtime.getURL('/').startsWith('safari-web-extension:');
+    return isSafariExtension();
 }
 
 /**

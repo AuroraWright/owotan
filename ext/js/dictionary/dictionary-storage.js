@@ -17,6 +17,7 @@
 
 import {parseJson} from '../core/json.js';
 import {BlobFileStore, BlobReadHandle} from '../data/blob-file-store.js';
+import {isSafariExtension} from '../extension/app-extension.js';
 
 /**
  * The file in each dictionary's directory that holds what Yomitan knows of it. It is written last,
@@ -73,13 +74,11 @@ export class OpfsDictionaryStorage {
             for (const name of IMPORT_FILE_NAMES) {
                 files.push({name, handle: await (await directory.getFileHandle(name, {create: true})).createSyncAccessHandle()});
             }
-            fs.mkdir(path);
-            fs.mount(hoshidicts.opfsFileSystem, {files: [], newFiles: files}, path);
+            mountFiles(hoshidicts, path, {files: [], newFiles: files});
             mounted = true;
             const record = await write();
             const written = new Set(findFiles(fs, path).map(({name}) => name));
-            fs.unmount(path);
-            fs.rmdir(path);
+            unmountFiles(fs, path);
             mounted = false;
             for (const {handle} of files.splice(0)) { handle.close(); }
             for (const name of IMPORT_FILE_NAMES) {
@@ -88,10 +87,7 @@ export class OpfsDictionaryStorage {
             await writeFile(directory, RECORD_FILE_NAME, new TextEncoder().encode(JSON.stringify(record)));
             return record;
         } catch (e) {
-            if (mounted) {
-                fs.unmount(path);
-                fs.rmdir(path);
-            }
+            if (mounted) { unmountFiles(fs, path); }
             for (const {handle} of files) { handle.close(); }
             await parent.removeEntry(id, {recursive: true}).catch(() => {});
             throw e;
@@ -135,18 +131,14 @@ export class OpfsDictionaryStorage {
             throw e;
         }
         return () => {
-            const {fs} = hoshidicts;
-            fs.mkdir(path);
-            fs.mount(hoshidicts.opfsFileSystem, {files}, path);
+            mountFiles(hoshidicts, path, {files});
             this._mountedHandles.set(path, files.map(({handle}) => handle));
         };
     }
 
     /** @type {import('dictionary-database').DictionaryStorage['unmount']} */
     unmount(hoshidicts, path) {
-        const {fs} = hoshidicts;
-        fs.unmount(path);
-        fs.rmdir(path);
+        unmountFiles(hoshidicts.fs, path);
         const handles = this._mountedHandles.get(path);
         if (typeof handles === 'undefined') { return; }
         this._mountedHandles.delete(path);
@@ -204,18 +196,12 @@ export class BlobDictionaryStorage {
         const entry = await this._store.get(id);
         if (entry === null) { throw new Error(`No dictionary ${id}`); }
         const files = entry.files.map(({name, blob}) => ({name, handle: new BlobReadHandle(blob)}));
-        return () => {
-            const {fs} = hoshidicts;
-            fs.mkdir(path);
-            fs.mount(hoshidicts.opfsFileSystem, {files}, path);
-        };
+        return () => { mountFiles(hoshidicts, path, {files}); };
     }
 
     /** @type {import('dictionary-database').DictionaryStorage['unmount']} */
     unmount(hoshidicts, path) {
-        const {fs} = hoshidicts;
-        fs.unmount(path);
-        fs.rmdir(path);
+        unmountFiles(hoshidicts.fs, path);
     }
 }
 
@@ -224,7 +210,7 @@ export class BlobDictionaryStorage {
  * @returns {import('dictionary-database').DictionaryStorage}
  */
 export function createDictionaryStorage() {
-    return new URL(import.meta.url).protocol === 'safari-web-extension:' ? new BlobDictionaryStorage() : new OpfsDictionaryStorage();
+    return isSafariExtension() ? new BlobDictionaryStorage() : new OpfsDictionaryStorage();
 }
 
 /**
@@ -277,13 +263,30 @@ export class MemoryDictionaryStorage {
 
     /** @type {import('dictionary-database').DictionaryStorage['unmount']} */
     unmount(hoshidicts, path) {
-        const {fs} = hoshidicts;
-        for (const name of fs.readdir(path)) {
-            if (name === '.' || name === '..') { continue; }
-            fs.unlink(`${path}/${name}`);
-        }
-        fs.rmdir(path);
+        removeDirectory(hoshidicts.fs, path);
     }
+}
+
+/**
+ * Mounts files at a new directory of the engine's file system, with the file system type of hoshidicts for files
+ * of the origin private file system and files read as they are.
+ * @param {import('./hoshidicts.js').Hoshidicts} hoshidicts
+ * @param {string} path
+ * @param {{files: {name: string, handle: unknown}[], newFiles?: {name: string, handle: FileSystemSyncAccessHandle}[]}} options
+ */
+function mountFiles(hoshidicts, path, options) {
+    hoshidicts.fs.mkdir(path);
+    hoshidicts.fs.mount(hoshidicts.opfsFileSystem, options, path);
+}
+
+/**
+ * Unmounts the files `mountFiles` mounted and removes their directory.
+ * @param {import('hoshidicts').FileSystem} fs
+ * @param {string} path
+ */
+function unmountFiles(fs, path) {
+    fs.unmount(path);
+    fs.rmdir(path);
 }
 
 /**
@@ -335,27 +338,22 @@ function removeDirectory(fs, path) {
 }
 
 /**
+ * Writes a file of the origin private file system, through a sync access handle, as only those are available
+ * where dictionaries are imported.
  * @param {FileSystemDirectoryHandle} directory
  * @param {string} name
  * @param {Uint8Array} content
  */
 async function writeFile(directory, name, content) {
-    const fileHandle = await directory.getFileHandle(name, {create: true});
-    if (typeof fileHandle.createSyncAccessHandle === 'function' && typeof WorkerGlobalScope !== 'undefined') {
-        const handle = await fileHandle.createSyncAccessHandle();
-        try {
-            handle.truncate(0);
-            let written = 0;
-            while (written < content.byteLength) {
-                written += handle.write(content.subarray(written), {at: written});
-            }
-            handle.flush();
-        } finally {
-            handle.close();
+    const handle = await (await directory.getFileHandle(name, {create: true})).createSyncAccessHandle();
+    try {
+        handle.truncate(0);
+        let written = 0;
+        while (written < content.byteLength) {
+            written += handle.write(content.subarray(written), {at: written});
         }
-    } else {
-        const writable = await fileHandle.createWritable();
-        await writable.write(content);
-        await writable.close();
+        handle.flush();
+    } finally {
+        handle.close();
     }
 }

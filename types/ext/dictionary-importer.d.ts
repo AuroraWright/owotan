@@ -37,7 +37,6 @@ export type ImportResult = {
 };
 
 export type ImportDetails = {
-    prefixWildcardsSupported: boolean;
     yomitanVersion: string;
 };
 
@@ -48,7 +47,6 @@ export type Summary = {
     minimumYomitanVersion?: string;
     version: number;
     importDate: number;
-    prefixWildcardsSupported: boolean;
     counts?: SummaryCounts;
     styles: string;
     isUpdatable?: boolean;
@@ -65,7 +63,6 @@ export type Summary = {
 };
 
 export type SummaryDetails = {
-    prefixWildcardsSupported: boolean;
     counts: SummaryCounts;
     styles: string;
     yomitanVersion: string;

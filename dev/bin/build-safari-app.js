@@ -106,7 +106,7 @@ if (typeof ipaExportMethod === 'undefined') {
 run('node', [path.join(dirname, 'build.js'), '--target', 'safari']);
 // The project gets its own copy of the extension, so that rebuilding the extension does not change it.
 run('xcrun', ['safari-web-extension-converter', '--project-location', appDirectory, '--app-name', appName, '--bundle-identifier', args['bundle-id'], '--swift', '--copy-resources', '--no-open', '--no-prompt', '--force', extensionDirectory]);
-// The extension reads the clipboard through native messaging, which this handler answers.
+// The extension sends native messages to the app extension, which this handler answers.
 fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'SafariWebExtensionHandler.swift'), path.join(appDirectory, appName, 'Shared (Extension)', 'SafariWebExtensionHandler.swift'));
 // The macOS app serves the Yomitan API (AppDelegate.swift), for which its sandbox has to let it accept connections.
 fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'AppDelegate.swift'), path.join(appDirectory, appName, 'macOS (App)', 'AppDelegate.swift'));

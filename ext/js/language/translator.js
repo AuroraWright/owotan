@@ -400,18 +400,16 @@ export class Translator {
         );
         if (deinflections.length === 0) { return []; }
 
-        const {matchType, language, enabledDictionaryMap} = options;
+        const {language, enabledDictionaryMap} = options;
 
-        await this._addEntriesToDeinflections(language, deinflections, enabledDictionaryMap, matchType);
+        await this._addEntriesToDeinflections(language, deinflections, enabledDictionaryMap);
 
-        const dictionaryDeinflections = await this._getDictionaryDeinflections(language, deinflections, enabledDictionaryMap, matchType);
+        const dictionaryDeinflections = await this._getDictionaryDeinflections(language, deinflections, enabledDictionaryMap);
         deinflections.push(...dictionaryDeinflections);
 
         for (const deinflection of deinflections) {
-            for (const entry of deinflection.databaseEntries) {
-                entry.definitions = entry.definitions.filter((definition) => !Array.isArray(definition));
-            }
-            deinflection.databaseEntries = deinflection.databaseEntries.filter((entry) => entry.definitions.length > 0 || (entry.deferredDefinitionCount ?? 0) > 0);
+            // An entry whose definitions are all deinflections was followed above, and is not a result itself.
+            deinflection.databaseEntries = deinflection.databaseEntries.filter((entry) => entry.deferredDefinitionCount > 0);
         }
         deinflections = deinflections.filter((deinflection) => deinflection.databaseEntries.length);
 
@@ -424,10 +422,9 @@ export class Translator {
      * @param {string} language
      * @param {import('translation-internal').DatabaseDeinflection[]} deinflections
      * @param {Map<string, import('translation').FindTermDictionary>} enabledDictionaryMap
-     * @param {import('dictionary').TermSourceMatchType} matchType
      * @returns {Promise<import('translation-internal').DatabaseDeinflection[]>}
      */
-    async _getDictionaryDeinflections(language, deinflections, enabledDictionaryMap, matchType) {
+    async _getDictionaryDeinflections(language, deinflections, enabledDictionaryMap) {
         safePerformance.mark('translator:getDictionaryDeinflections:start');
         /** @type {import('translation-internal').DatabaseDeinflection[]} */
         const dictionaryDeinflections = [];
@@ -438,26 +435,23 @@ export class Translator {
                 const entryDictionary = enabledDictionaryMap.get(dictionary);
                 const useDeinflections = entryDictionary?.useDeinflections ?? true;
                 if (!useDeinflections) { continue; }
-                for (const definition of definitions) {
-                    if (Array.isArray(definition)) {
-                        const [formOf, inflectionRules] = definition;
-                        if (!formOf) { continue; }
+                for (const [formOf, inflectionRules] of definitions) {
+                    if (!formOf) { continue; }
 
-                        const inflectionRuleChainCandidates = algorithmChains.map(({inflectionRules: algInflections}) => {
-                            return {
-                                source: /** @type {import('dictionary').InflectionSource} */ (algInflections.length === 0 ? 'dictionary' : 'both'),
-                                inflectionRules: [...algInflections, ...inflectionRules],
-                            };
-                        });
+                    const inflectionRuleChainCandidates = algorithmChains.map(({inflectionRules: algInflections}) => {
+                        return {
+                            source: /** @type {import('dictionary').InflectionSource} */ (algInflections.length === 0 ? 'dictionary' : 'both'),
+                            inflectionRules: [...algInflections, ...inflectionRules],
+                        };
+                    });
 
-                        const dictionaryDeinflection = this._createDeinflection(originalText, transformedText, formOf, 0, textProcessorRuleChainCandidates, inflectionRuleChainCandidates);
-                        dictionaryDeinflections.push(dictionaryDeinflection);
-                    }
+                    const dictionaryDeinflection = this._createDeinflection(originalText, transformedText, formOf, 0, textProcessorRuleChainCandidates, inflectionRuleChainCandidates);
+                    dictionaryDeinflections.push(dictionaryDeinflection);
                 }
             }
         }
 
-        await this._addEntriesToDeinflections(language, dictionaryDeinflections, enabledDictionaryMap, matchType);
+        await this._addEntriesToDeinflections(language, dictionaryDeinflections, enabledDictionaryMap);
 
         safePerformance.mark('translator:getDictionaryDeinflections:end');
         safePerformance.measure('translator:getDictionaryDeinflections', 'translator:getDictionaryDeinflections:start', 'translator:getDictionaryDeinflections:end');
@@ -468,14 +462,13 @@ export class Translator {
      * @param {string} language
      * @param {import('translation-internal').DatabaseDeinflection[]} deinflections
      * @param {Map<string, import('translation').FindTermDictionary>} enabledDictionaryMap
-     * @param {import('dictionary').TermSourceMatchType} matchType
      */
-    async _addEntriesToDeinflections(language, deinflections, enabledDictionaryMap, matchType) {
+    async _addEntriesToDeinflections(language, deinflections, enabledDictionaryMap) {
         const uniqueDeinflectionsMap = this._groupDeinflectionsByTerm(deinflections);
         const uniqueDeinflectionArrays = [...uniqueDeinflectionsMap.values()];
         const uniqueDeinflectionTerms = [...uniqueDeinflectionsMap.keys()];
 
-        const databaseEntries = await this._database.findTermsBulk(uniqueDeinflectionTerms, enabledDictionaryMap, matchType);
+        const databaseEntries = await this._database.findTermsBulk(uniqueDeinflectionTerms, enabledDictionaryMap);
         this._matchEntriesToDeinflections(language, databaseEntries, uniqueDeinflectionArrays, enabledDictionaryMap);
     }
 
@@ -1800,29 +1793,24 @@ export class Translator {
      */
     _createTermDictionaryEntryFromDatabaseEntry(databaseEntry, originalText, transformedText, deinflectedText, textProcessorRuleChainCandidates, inflectionRuleChainCandidates, isPrimary, enabledDictionaryMap, tagAggregator, primaryReading) {
         const {
-            matchType,
             matchSource,
             term,
             reading: rawReading,
             definitionTags,
             termTags,
-            definitions,
-            deferredDefinitionCount,
             score,
             dictionary,
             id,
             sequence: rawSequence,
             rules,
         } = databaseEntry;
-        const isDeferred = typeof deferredDefinitionCount === 'number';
-        // Cast is safe because getDeinflections filters out deinflection definitions
-        const contentDefinitions = isDeferred ? [] : /** @type {import('dictionary-data').TermGlossaryContent[]} */ (definitions);
         const reading = (rawReading.length > 0 ? rawReading : term);
         const matchPrimaryReading = primaryReading.length > 0 && reading === primaryReading;
         const {index: dictionaryIndex} = this._getDictionaryOrder(dictionary, enabledDictionaryMap);
         const dictionaryAlias = this._getDictionaryAlias(dictionary, enabledDictionaryMap);
         const sourceTermExactMatchCount = (isPrimary && deinflectedText === term ? 1 : 0);
-        const source = this._createSource(originalText, transformedText, deinflectedText, matchType, matchSource, isPrimary);
+        // The database finds only exact matches.
+        const source = this._createSource(originalText, transformedText, deinflectedText, 'exact', matchSource, isPrimary);
         const maxOriginalTextLength = originalText.length;
         const hasSequence = (rawSequence >= 0);
         const sequence = hasSequence ? rawSequence : -1;
@@ -1834,8 +1822,9 @@ export class Translator {
         tagAggregator.addTags(headwordTagGroups, dictionary, termTags);
         tagAggregator.addTags(definitionTagGroups, dictionary, definitionTags);
 
-        const definition = this._createTermDefinition(0, [0], dictionary, dictionaryIndex, dictionaryAlias, id, score, [sequence], isPrimary, definitionTagGroups, contentDefinitions);
-        if (isDeferred) { this._deferredDefinitions.add(definition); }
+        // The definition's content is loaded once the entries that need it are known (_loadDeferredDefinitions).
+        const definition = this._createTermDefinition(0, [0], dictionary, dictionaryIndex, dictionaryAlias, id, score, [sequence], isPrimary, definitionTagGroups, []);
+        this._deferredDefinitions.add(definition);
 
         return this._createTermDictionaryEntry(
             isPrimary,

@@ -62,12 +62,7 @@ export type Options = {
 };
 
 export type GlobalOptions = {
-    database: GlobalDatabaseOptions;
     dataTransmissionConsentShown: boolean;
-};
-
-export type GlobalDatabaseOptions = {
-    prefixWildcardsSupported: boolean;
 };
 
 export type Profile = {
@@ -203,7 +198,6 @@ export type ScanningOptions = {
     enableOnSearchPage: boolean;
     enableSearchTags: boolean;
     layoutAwareScan: boolean;
-    matchTypePrefix: boolean;
     hidePopupOnCursorExit: boolean;
     hidePopupOnCursorExitDelay: number;
     reducedMotionScrolling: boolean;

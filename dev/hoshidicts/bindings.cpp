@@ -21,7 +21,6 @@
 #include <emscripten/emscripten.h>
 
 #include <exception>
-#include <filesystem>
 #include <glaze/glaze.hpp>
 #include <hoshidicts/importer.hpp>
 #include <hoshidicts/query.hpp>
@@ -39,8 +38,6 @@ using TagRow = std::tuple<std::string, std::string, double, std::string, double>
 
 struct ImportReport {
   bool success = false;
-  std::string title;
-  std::string directory;
   std::string error;
   SummaryCounts counts;
   std::vector<TagRow> tags;
@@ -97,10 +94,8 @@ EMSCRIPTEN_KEEPALIVE const char* yh_import(const char* archive_path, const char*
   try {
     auto result = dictionary_importer::import(archive_path, output_directory);
     report.success = result.success;
-    report.title = result.title;
     report.error = result.error;
     if (result.success) {
-      report.directory = (std::filesystem::path(output_directory) / dictionary_importer::folder_name(result.title)).string();
       report.counts = std::move(result.summary.counts);
       for (auto& tag : result.summary.tags) {
         report.tags.emplace_back(std::move(tag.name), std::move(tag.category), tag.order, std::move(tag.notes), tag.score);
@@ -115,9 +110,9 @@ EMSCRIPTEN_KEEPALIVE const char* yh_import(const char* archive_path, const char*
 }
 
 // Loads the dictionary at `path` for every kind of query. Its entries are read
-// on demand when `paged` is set, otherwise copied into memory.
-EMSCRIPTEN_KEEPALIVE int yh_add(const char* path, int paged) {
-  const auto storage = paged ? DictionaryStorage::Paged : DictionaryStorage::Mapped;
+// from the files on demand, rather than copied into memory.
+EMSCRIPTEN_KEEPALIVE int yh_add(const char* path) {
+  const auto storage = DictionaryStorage::Paged;
   try {
     return g_query.add_term_dict(path, storage) && g_query.add_freq_dict(path, storage) &&
                    g_query.add_kanji_dict(path, storage)
@@ -133,13 +128,13 @@ EMSCRIPTEN_KEEPALIVE void yh_remove(const char* path) { g_query.remove_dict(path
 
 // ["key", ...] -> [[TermRow, ...], ...], without glossaries.
 EMSCRIPTEN_KEEPALIVE const char* yh_find_terms(const char* keys_json) {
-  return each_key<std::string>(keys_json, [](const std::string& key) { return g_query.query_rows(key, false); });
+  return each_key<std::string>(keys_json, [](const std::string& key) { return g_query.query_rows(key); });
 }
 
 // [["dictionary", sequence], ...] -> [[TermRow, ...], ...], without glossaries.
 EMSCRIPTEN_KEEPALIVE const char* yh_find_terms_by_sequence(const char* items_json) {
   return each_key<std::tuple<std::string, int64_t>>(items_json, [](const auto& item) {
-    return g_query.query_sequence_rows(std::get<0>(item), std::get<1>(item), false);
+    return g_query.query_sequence_rows(std::get<0>(item), std::get<1>(item));
   });
 }
 

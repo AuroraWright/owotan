@@ -16,7 +16,7 @@
  */
 
 import type {Summary} from '../ext/dictionary-importer';
-import type {Tag, MatchType, TermMetaType, KanjiMetaType, TermExactRequest, DictionaryCounts} from '../ext/dictionary-database';
+import type {Tag, TermMetaType, KanjiMetaType, TermExactRequest, DictionaryCounts} from '../ext/dictionary-database';
 
 export type DatabaseTestData = {
     expectedSummary: Summary;
@@ -28,7 +28,7 @@ export type DatabaseTestData = {
         findTermMetaBulk: FindTermMetaBulkTestCase[];
         findKanjiBulk: FindKanjiBulkTestCase[];
         findKanjiMetaBulk: FindKanjiMetaBulkTestCase[];
-        findTagForTitle: FindTagForTitleTestCase[];
+        findTagMetaBulk: FindTagMetaBulkTestCase[];
     };
 };
 
@@ -36,7 +36,6 @@ export type ItemCount<TKey = unknown> = [key: TKey, count: number];
 
 export type FindTermsBulkTestCase = {
     inputs: {
-        matchType: MatchType;
         termList: string[];
     }[];
     expectedResults: {
@@ -98,7 +97,7 @@ export type FindKanjiMetaBulkTestCase = {
     };
 };
 
-export type FindTagForTitleTestCase = {
+export type FindTagMetaBulkTestCase = {
     inputs: {
         name: string;
     }[];

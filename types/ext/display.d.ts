@@ -61,8 +61,6 @@ export type HistoryParams = {
     type?: PageType;
     /** The search query. */
     query?: string;
-    /** Whether or not wildcards can be used for the search query. */
-    wildcards?: 'on' | 'off';
     /** The start position of the `query` string as an index into the `full` query string. */
     offset?: string;
     /** The full search text. If absent, `query` is the full search text. */

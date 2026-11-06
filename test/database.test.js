@@ -118,11 +118,11 @@ describe('Database', () => {
         // Setup database
         const dictionaryDatabase = new DictionaryDatabase(new MemoryDictionaryStorage());
         /** @type {import('dictionary-importer').ImportDetails} */
-        const defaultImportDetails = {prefixWildcardsSupported: false, yomitanVersion: '0.0.0.0'};
+        const defaultImportDetails = {yomitanVersion: '0.0.0.0'};
 
         // Database not open
         await expect.soft(dictionaryDatabase.deleteDictionary(title)).rejects.toThrow('Database not open');
-        await expect.soft(dictionaryDatabase.findTermsBulk(['?'], titles, 'exact')).rejects.toThrow('Database not open');
+        await expect.soft(dictionaryDatabase.findTermsBulk(['?'], titles)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermsExactBulk([{term: '?', reading: '?'}], titles)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermsBySequenceBulk([{query: 1, dictionary: title}])).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findTermGlossariesBulk([{id: 1, dictionary: title}])).rejects.toThrow('Database not open');
@@ -130,7 +130,7 @@ describe('Database', () => {
         await expect.soft(dictionaryDatabase.findTermMetaBulk(['?'], titles)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findKanjiBulk(['?'], titles)).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.findKanjiMetaBulk(['?'], titles)).rejects.toThrow('Database not open');
-        await expect.soft(dictionaryDatabase.findTagForTitle('tag', title)).rejects.toThrow('Database not open');
+        await expect.soft(dictionaryDatabase.findTagMetaBulk([{query: 'tag', dictionary: title}])).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.getDictionaryInfo()).rejects.toThrow('Database not open');
         await expect.soft(dictionaryDatabase.getDictionaryCounts([...titles.keys()], true)).rejects.toThrow('Database not open');
         await expect.soft(createDictionaryImporter(expect).importDictionary(dictionaryDatabase, testDictionarySource, defaultImportDetails)).rejects.toThrow('Database is not ready');
@@ -164,7 +164,7 @@ describe('Database', () => {
                 const testDictionarySource = await createTestDictionaryArchiveData(name);
 
                 /** @type {import('dictionary-importer').ImportDetails} */
-                const detaultImportDetails = {prefixWildcardsSupported: false, yomitanVersion: '0.0.0.0'};
+                const detaultImportDetails = {yomitanVersion: '0.0.0.0'};
                 await expect.soft(createDictionaryImporter(expect).importDictionary(dictionaryDatabase, testDictionarySource, detaultImportDetails)).rejects.toThrow('Dictionary has invalid data');
                 await dictionaryDatabase.close();
             });
@@ -196,7 +196,7 @@ describe('Database', () => {
             const {result: importDictionaryResult, errors: importDictionaryErrors} = await dictionaryImporter.importDictionary(
                 dictionaryDatabase,
                 testDictionarySource,
-                {prefixWildcardsSupported: true, yomitanVersion: '0.0.0.0'},
+                {yomitanVersion: '0.0.0.0'},
             );
 
             if (importDictionaryResult) {
@@ -218,10 +218,8 @@ describe('Database', () => {
 
             // Test findTermsBulk
             for (const {inputs, expectedResults} of testData.tests.findTermsBulk) {
-                for (const {termList, matchType} of inputs) {
-                    // A hash index finds exact matches only; wildcard searches are not supported.
-                    if (matchType !== 'exact') { continue; }
-                    const results = await dictionaryDatabase.findTermsBulk(termList, titles, matchType);
+                for (const {termList} of inputs) {
+                    const results = await dictionaryDatabase.findTermsBulk(termList, titles);
                     expect.soft(results.length).toStrictEqual(expectedResults.total);
                     for (const [term, count] of expectedResults.terms) {
                         expect.soft(countDictionaryDatabaseEntriesWithTerm(results, term)).toStrictEqual(count);
@@ -293,16 +291,16 @@ describe('Database', () => {
                 }
             }
 
-            // Test findTagForTitle
-            for (const {inputs, expectedResults} of testData.tests.findTagForTitle) {
+            // Test findTagMetaBulk
+            for (const {inputs, expectedResults} of testData.tests.findTagMetaBulk) {
                 for (const {name} of inputs) {
-                    const result = await dictionaryDatabase.findTagForTitle(name, title);
-                    expect.soft(result).toStrictEqual(expectedResults.value);
+                    const [result] = await dictionaryDatabase.findTagMetaBulk([{query: name, dictionary: title}]);
+                    expect.soft(result ?? null).toStrictEqual(expectedResults.value);
                 }
             }
 
             // Test findTermGlossariesBulk
-            const termEntries = await dictionaryDatabase.findTermsBulk(['打', '打つ'], titles, 'exact');
+            const termEntries = await dictionaryDatabase.findTermsBulk(['打', '打つ'], titles);
             expect.soft(termEntries.length).toBeGreaterThan(0);
             const glossaries = await dictionaryDatabase.findTermGlossariesBulk([
                 ...termEntries.map(({id}) => ({id, dictionary: title})),
@@ -340,7 +338,7 @@ describe('Database', () => {
 
                 // Import data
                 const dictionaryImporter = createDictionaryImporter(expect);
-                await dictionaryImporter.importDictionary(dictionaryDatabase, testDictionarySource, {prefixWildcardsSupported: true, yomitanVersion: '0.0.0.0'});
+                await dictionaryImporter.importDictionary(dictionaryDatabase, testDictionarySource, {yomitanVersion: '0.0.0.0'});
 
                 // Clear
                 switch (clearMethod) {

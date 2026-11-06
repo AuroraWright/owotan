@@ -21,10 +21,10 @@
 // The pinned MeCab commit is checked out under node_modules/.cache, which no
 // linter or test runner looks in.
 
-import {execFileSync} from 'child_process';
-import {copyFileSync, existsSync, mkdirSync} from 'fs';
+import {copyFileSync, mkdirSync} from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
+import {checkOutCommit, run} from '../emscripten-build.js';
 
 const repository = 'https://github.com/taku910/mecab';
 const commit = '61b90ba6e669dc2d7d533d4a80d206f3b31d52b1';
@@ -36,22 +36,7 @@ const sourceDirectory = path.join(buildDirectory, 'mecab');
 const cmakeDirectory = path.join(buildDirectory, 'cmake');
 const outputDirectory = path.join(dirname, '..', '..', 'ext', 'lib');
 
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {string} [cwd]
- */
-function run(command, args, cwd) {
-    execFileSync(command, args, {cwd, stdio: 'inherit'});
-}
-
-mkdirSync(buildDirectory, {recursive: true});
-if (!existsSync(sourceDirectory)) {
-    run('git', ['clone', repository, sourceDirectory]);
-}
-run('git', ['fetch', '--quiet', 'origin', commit], sourceDirectory);
-run('git', ['reset', '--quiet', '--hard', commit], sourceDirectory);
-run('git', ['clean', '--quiet', '-fdx'], sourceDirectory);
+checkOutCommit(repository, commit, sourceDirectory);
 
 run('emcmake', ['cmake', '-S', projectDirectory, '-B', cmakeDirectory, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', `-DMECAB_SOURCE_DIR=${sourceDirectory}`]);
 run('cmake', ['--build', cmakeDirectory]);

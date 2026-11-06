@@ -15,7 +15,6 @@
         },
         "default": {
             "type": "terms",
-            "matchType": "exact",
             "deinflect": true,
             "mainDictionary": "${title}",
             "sortFrequencyDictionary": null,

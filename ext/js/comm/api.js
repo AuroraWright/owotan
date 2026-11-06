@@ -459,14 +459,6 @@ export class API {
     }
 
     /**
-     * @param {string} url
-     * @returns {Promise<{data: string, contentType: string}|null>}
-     */
-    fetchLocalAudioData(url) {
-        return this._invoke('fetchLocalAudioData', {url});
-    }
-
-    /**
      * @param {import('api').ApiParam<'downloadAudio', 'url'>} url
      * @param {import('api').ApiParam<'downloadAudio', 'sourceType'>} sourceType
      * @returns {Promise<import('api').ApiReturn<'downloadAudio'>>}
@@ -536,7 +528,7 @@ export class API {
      * @param {Transferable[]} transferables
      */
     _pmInvoke(action, params, transferables) {
-        // When the backend isn't a service worker, as on Firefox and Safari, we instead use a MessageChannel
+        // When the backend isn't a service worker, as on Firefox, we instead use a MessageChannel
         // which is established via a handshake via a SharedWorker
         if (this._backendPort !== null) {
             this._backendPort.postMessage({action, params}, transferables);

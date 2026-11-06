@@ -18,6 +18,8 @@
 import {readResponseJson} from '../core/json.js';
 import {log} from '../core/log.js';
 import {toError} from '../core/to-error.js';
+import {promiseTimeout} from '../core/utilities.js';
+import {sendAppExtensionMessage} from '../extension/app-extension.js';
 
 /**
  * How long the extension waits for itself to answer a request before it takes the next.
@@ -49,8 +51,6 @@ export class YomitanApiAppConnection {
         this._onResponded = null;
         /** @type {ConnectionEvent<(message: unknown) => void>} */
         this.onMessage = new ConnectionEvent();
-        /** @type {ConnectionEvent<() => void>} */
-        this.onDisconnect = new ConnectionEvent();
     }
 
     /** */
@@ -95,13 +95,13 @@ export class YomitanApiAppConnection {
                 if (++failures % FAILURES_BEFORE_START === 0) {
                     await this._startApp();
                 }
-                await delay(RETRY_DELAY);
+                await promiseTimeout(RETRY_DELAY);
                 continue;
             }
             failures = 0;
             if (response.status === 204) { continue; }
             if (!response.ok) {
-                await delay(RETRY_DELAY);
+                await promiseTimeout(RETRY_DELAY);
                 continue;
             }
 
@@ -124,24 +124,10 @@ export class YomitanApiAppConnection {
     /** Has the app extension start the app, which serves the requests, unless it is running. */
     async _startApp() {
         try {
-            /** @type {unknown} */
-            const response = await new Promise((resolve, reject) => {
-                // Safari sends native messages to the app extension whichever application is named.
-                const port = Number.parseInt(new URL(this._serverUrl).port || '80', 10);
-                chrome.runtime.sendNativeMessage('application.id', {action: 'startApiServer', port}, (result) => {
-                    const error = chrome.runtime.lastError;
-                    if (error) {
-                        reject(new Error(error.message));
-                    } else {
-                        resolve(result);
-                    }
-                });
-            });
-            if (typeof response === 'object' && response !== null && 'error' in response) {
-                throw new Error(String(response.error));
-            }
+            const port = Number.parseInt(new URL(this._serverUrl).port || '80', 10);
+            await sendAppExtensionMessage({action: 'startApiServer', port}, 'Could not start the Yomitan app, which serves the Yomitan API');
         } catch (e) {
-            log.error(new Error(`Could not start the Yomitan app, which serves the Yomitan API: ${toError(e).message}`));
+            log.error(toError(e));
         }
     }
 }
@@ -169,12 +155,4 @@ class ConnectionEvent {
     removeListener(callback) {
         this.callbacks.delete(callback);
     }
-}
-
-/**
- * @param {number} milliseconds
- * @returns {Promise<void>}
- */
-function delay(milliseconds) {
-    return new Promise((resolve) => { setTimeout(resolve, milliseconds); });
 }

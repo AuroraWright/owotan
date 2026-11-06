@@ -31,14 +31,14 @@ async function findTermsBulk(termList) {
         if (term !== 'admire') { continue; }
         entries.push({
             index,
-            matchType: 'exact',
             matchSource: 'term',
             term: 'admire',
             reading: '',
             definitionTags: [],
             termTags: [],
             rules: ['v'],
-            definitions: ['admire definition'],
+            definitions: [],
+            deferredDefinitionCount: 1,
             score: 1,
             dictionary,
             id: 1,
@@ -49,11 +49,20 @@ async function findTermsBulk(termList) {
 }
 
 /**
+ * @param {import('dictionary-database').TermGlossaryRequest[]} items
+ * @returns {Promise<import('dictionary-data').TermGlossary[][]>}
+ */
+async function findTermGlossariesBulk(items) {
+    return items.map(() => ['admire definition']);
+}
+
+/**
  * @returns {Translator}
  */
 function createTranslator() {
     const translator = new Translator(/** @type {import('../../ext/js/dictionary/dictionary-database.js').DictionaryDatabase} */ (/** @type {unknown} */ ({
         findTermsBulk,
+        findTermGlossariesBulk,
     })));
     translator.prepare();
     return translator;
@@ -63,7 +72,6 @@ describe('English translator POS filtering', () => {
     test('matches verb entries for -able deinflections through adverbs', async () => {
         const translator = createTranslator();
         const {dictionaryEntries} = await translator.findTerms('simple', 'admirably', {
-            matchType: 'exact',
             deinflect: true,
             mainDictionary: dictionary,
             sortFrequencyDictionary: null,

@@ -24,6 +24,7 @@ import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {JsonSchema} from '../data/json-schema.js';
 import {NativeSimpleDOMParser} from '../dom/native-simple-dom-parser.js';
 import {SimpleDOMParser} from '../dom/simple-dom-parser.js';
+import {sendAppExtensionMessage} from '../extension/app-extension.js';
 import {convertKatakanaToHiragana, isStringEntirelyKana} from '../language/ja/japanese.js';
 
 /** @type {RequestInit} */
@@ -663,21 +664,7 @@ export class AudioDownloader {
      * @returns {Promise<{[key: string]: unknown}>}
      */
     _sendLocalAudioMessage(message) {
-        return new Promise((resolve, reject) => {
-            // Safari sends native messages to the app extension whichever application is named.
-            chrome.runtime.sendNativeMessage('application.id', message, (/** @type {unknown} */ response) => {
-                const error = chrome.runtime.lastError;
-                if (error) {
-                    reject(new Error(`Cannot read android.db: ${error.message}`));
-                } else if (typeof response !== 'object' || response === null) {
-                    reject(new Error('Cannot read android.db'));
-                } else if ('error' in response) {
-                    reject(new Error(String(response.error)));
-                } else {
-                    resolve(/** @type {{[key: string]: unknown}} */ (response));
-                }
-            });
-        });
+        return sendAppExtensionMessage(message, 'Cannot read android.db');
     }
 
     /**

@@ -16,17 +16,17 @@
  */
 
 // Builds the hoshidicts dictionary engine into ext/lib/hoshidicts.{js,wasm}, and
-// with threads, for imports in cross-origin isolated pages, into
+// with threads, for cross-origin isolated contexts, into
 // ext/lib/hoshidicts-threads.{js,wasm}.
 // Needs git, cmake, ninja and an activated Emscripten SDK (emcmake on PATH).
 // The pinned hoshidicts commit is checked out under node_modules/.cache, which
 // no linter or test runner looks in, and dev/hoshidicts/hoshidicts.patch, the
 // changes Yomitan needs, applied to it.
 
-import {execFileSync} from 'child_process';
-import {copyFileSync, existsSync, mkdirSync} from 'fs';
+import {copyFileSync, mkdirSync} from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
+import {checkOutCommit, run} from '../emscripten-build.js';
 
 const repository = 'https://github.com/bee-san/hoshidicts';
 const commit = 'e5751e88328969b2e0217a0caa0eebc36b6e4089';
@@ -39,26 +39,11 @@ const cmakeDirectory = path.join(buildDirectory, 'cmake');
 const cmakeThreadsDirectory = path.join(buildDirectory, 'cmake-threads');
 const outputDirectory = path.join(dirname, '..', '..', 'ext', 'lib');
 
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {string} [cwd]
- */
-function run(command, args, cwd) {
-    execFileSync(command, args, {cwd, stdio: 'inherit'});
-}
-
-mkdirSync(buildDirectory, {recursive: true});
-if (!existsSync(sourceDirectory)) {
-    run('git', ['clone', repository, sourceDirectory]);
-}
-run('git', ['fetch', '--quiet', 'origin', commit], sourceDirectory);
-run('git', ['reset', '--quiet', '--hard', commit], sourceDirectory);
-run('git', ['clean', '--quiet', '-fdx'], sourceDirectory);
+checkOutCommit(repository, commit, sourceDirectory);
 run('git', ['submodule', 'update', '--quiet', '--init', '--recursive'], sourceDirectory);
 run('git', ['apply', path.join(projectDirectory, 'hoshidicts.patch')], sourceDirectory);
 
-// The single-threaded module, for lookups and for imports where threads are unavailable, and the threaded one.
+// The module without threads, for contexts that are not cross-origin isolated, and the one with them.
 for (const [directory, threads] of /** @type {[string, boolean][]} */ ([[cmakeDirectory, false], [cmakeThreadsDirectory, true]])) {
     run('emcmake', ['cmake', '-S', projectDirectory, '-B', directory, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', `-DHOSHIDICTS_SOURCE_DIR=${sourceDirectory}`, `-DYOMITAN_HOSHIDICTS_THREADS=${threads ? 'ON' : 'OFF'}`]);
     run('cmake', ['--build', directory]);

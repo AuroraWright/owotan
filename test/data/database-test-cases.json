@@ -7,7 +7,6 @@
     "version": 3,
     "importDate": 0,
     "importSuccess": true,
-    "prefixWildcardsSupported": true,
     "counts": {
       "kanji": {
         "total": 2
@@ -58,7 +57,6 @@
       {
         "inputs": [
           {
-            "matchType": "exact",
             "termList": [
               "打",
               "打つ",
@@ -66,7 +64,6 @@
             ]
           },
           {
-            "matchType": "exact",
             "termList": [
               "だ",
               "ダース",
@@ -74,12 +71,6 @@
               "ぶつ",
               "うちこむ",
               "ぶちこむ"
-            ]
-          },
-          {
-            "matchType": "prefix",
-            "termList": [
-              "打"
             ]
           }
         ],
@@ -130,7 +121,6 @@
       {
         "inputs": [
           {
-            "matchType": "exact",
             "termList": [
               "込む"
             ]
@@ -145,36 +135,6 @@
       {
         "inputs": [
           {
-            "matchType": "suffix",
-            "termList": [
-              "込む"
-            ]
-          }
-        ],
-        "expectedResults": {
-          "total": 4,
-          "terms": [
-            [
-              "打ち込む",
-              4
-            ]
-          ],
-          "readings": [
-            [
-              "うちこむ",
-              2
-            ],
-            [
-              "ぶちこむ",
-              2
-            ]
-          ]
-        }
-      },
-      {
-        "inputs": [
-          {
-            "matchType": "exact",
             "termList": []
           }
         ],
@@ -746,7 +706,7 @@
         }
       }
     ],
-    "findTagForTitle": [
+    "findTagMetaBulk": [
       {
         "inputs": [
           {

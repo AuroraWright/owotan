@@ -17,6 +17,7 @@
 
 import {EventDispatcher} from '../core/event-dispatcher.js';
 import {toError} from '../core/to-error.js';
+import {isSafariExtension} from './app-extension.js';
 
 /**
  * @augments EventDispatcher<import('web-extension').Events>
@@ -101,16 +102,6 @@ export class WebExtension extends EventDispatcher {
     }
 
     /**
-     * @param {unknown} message
-     */
-    sendMessageIgnoreResponse(message) {
-        this.sendMessage(message, () => {
-            // Clear the last error
-            this.getLastError();
-        });
-    }
-
-    /**
      * Listens for the messages that the backend sends to this page's frame.
      * @param {import('extension').ChromeRuntimeOnMessageCallback<import('application').ApiMessageAny>} callback
      */
@@ -165,7 +156,7 @@ export class WebExtension extends EventDispatcher {
      * that the frame opens, and which it opens again when the backend stops.
      */
     _connectMessagePort() {
-        if (this._messagePort !== null || this._extensionBaseUrl === null || !this._extensionBaseUrl.startsWith('safari-web-extension:')) { return; }
+        if (this._messagePort !== null || this._extensionBaseUrl === null || !isSafariExtension()) { return; }
         try {
             this._messagePort = chrome.runtime.connect({name: 'tabMessages'});
         } catch (e) {

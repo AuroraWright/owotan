@@ -12,34 +12,6 @@
             </div>
         </div>
         <div id="dictionaries-modal-body" class="modal-body">
-            <div class="settings-item">
-                <div class="settings-item-inner">
-                    <div class="settings-item-left">
-                        <div class="settings-item-label">
-                            Enable support for prefix wildcard searches
-                            <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">(?)</a>
-                        </div>
-                    </div>
-                    <div class="settings-item-right">
-                        <label class="toggle"><input type="checkbox" data-setting="global.database.prefixWildcardsSupported" data-scope="global"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
-                    </div>
-                </div>
-                <div class="settings-item-children more" hidden>
-                    <p>
-                        In order for dictionaries to support searches using prefix wildcards on the search page,
-                        some additional data must be stored in the database.
-                        Enabling this option will include this extra data for any new dictionaries that are imported.
-                    </p>
-                    <p class="warning-text">
-                        This option will not change any dictionaries that are already imported;
-                        they must be re-imported for the option to take effect.
-                    </p>
-                    <p>
-                        <a tabindex="0" class="more-toggle" data-parent-distance="3">Hide&hellip;</a>
-                    </p>
-                </div>
-            </div>
-
             <div class="warning-text margin-above no-dictionaries-installed-warning" hidden>
                 No dictionaries have been installed yet.
                 Visit the <a href="https://github.com/yomidevs/yomitan/blob/master/docs/dictionaries.md#dictionaries" target="_blank" rel="noopener noreferrer">Yomitan homepage</a>
@@ -58,8 +30,7 @@
             <div hidden><input type="file" id="dictionary-import-file-input" accept=".zip,application/zip" multiple></div>
         </div>
         <div class="modal-body-addon dictionary-delete-progress" hidden>
-            <div class="progress-labels"><div class="progress-info"></div><div class="progress-status"></div></div>
-            <div class="progress-bar-track"><div class="progress-bar danger"></div></div>
+            <div class="progress-labels"><div class="progress-info"></div></div>
         </div>
         <div class="modal-body-addon dictionary-import-progress" hidden>
             <div class="progress-labels"><div class="progress-info"></div><div class="progress-status"></div></div>
@@ -177,25 +148,6 @@
                 This dictionary is outdated and may not support new extension features.
                 Re-import the dictionary to enable support for the latest features.
             </div></div>
-            <div class="settings-item">
-                <div class="settings-item-inner">
-                    <div class="settings-item-left">
-                        <div class="settings-item-label">
-                            Prefix wildcard searches supported
-                            <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">(?)</a>
-                        </div>
-                    </div>
-                    <div class="settings-item-right">
-                        <label class="toggle"><input type="checkbox" class="dictionary-prefix-wildcard-searches-supported" disabled><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
-                    </div>
-                </div>
-                <div class="settings-item-children more" hidden>
-                    <p class="warning-text">
-                        Changing this value requires the dictionary to be re-imported.
-                    </p>
-                    <p><a tabindex="0" class="more-toggle" data-parent-distance="3">Hide&hellip;</a></p>
-                </div>
-            </div>
             <div class="settings-item dictionary-parts-of-speech-filter-setting" hidden>
                 <div class="settings-item-inner">
                     <div class="settings-item-left">
@@ -326,8 +278,7 @@
             </div>
         </div>
         <div class="modal-body-addon dictionary-delete-progress" hidden>
-            <div class="progress-labels"><div class="progress-info"></div><div class="progress-status"></div></div>
-            <div class="progress-bar-track"><div class="progress-bar danger"></div></div>
+            <div class="progress-labels"><div class="progress-info"></div></div>
         </div>
         <div class="modal-body-addon dictionary-import-progress" hidden>
             <div class="progress-labels"><div class="progress-info"></div><div class="progress-status"></div></div>

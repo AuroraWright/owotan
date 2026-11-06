@@ -126,17 +126,15 @@ Yomitan uses several third-party libraries to function.
 
 <!-- The following table is generated using the command `npm run license-report:markdown`. -->
 
-| Name                | License type | Link                                                                   |
-| :------------------ | :----------- | :--------------------------------------------------------------------- |
-| @resvg/resvg-wasm   | MPL-2.0      | git+ssh://git@github.com/yisibl/resvg-js.git                           |
-| @zip.js/zip.js      | BSD-3-Clause | git+https://github.com/gildas-lormeau/zip.js.git                       |
-| dexie               | Apache-2.0   | git+https://github.com/dexie/Dexie.js.git                              |
-| dexie-export-import | Apache-2.0   | git+https://github.com/dexie/Dexie.js.git                              |
-| hangul-js           | MIT          | git://github.com/e-/Hangul.js.git                                      |
-| kanji-processor     | n/a          | https://registry.npmjs.org/kanji-processor/-/kanji-processor-1.0.2.tgz |
-| parse5              | MIT          | git://github.com/inikulin/parse5.git                                   |
-| yomitan-handlebars  | MIT          | n/a                                                                    |
-| linkedom            | ISC          | git+https://github.com/WebReflection/linkedom.git                      |
+| Name               | License type | Link                                                                   |
+| :----------------- | :----------- | :--------------------------------------------------------------------- |
+| @resvg/resvg-wasm  | MPL-2.0      | git+ssh://git@github.com/yisibl/resvg-js.git                           |
+| @zip.js/zip.js     | BSD-3-Clause | git+https://github.com/gildas-lormeau/zip.js.git                       |
+| hangul-js          | MIT          | git://github.com/e-/Hangul.js.git                                      |
+| kanji-processor    | n/a          | https://registry.npmjs.org/kanji-processor/-/kanji-processor-1.0.2.tgz |
+| linkedom           | ISC          | git+https://github.com/WebReflection/linkedom.git                      |
+| parse5             | MIT          | git://github.com/inikulin/parse5.git                                   |
+| yomitan-handlebars | MIT          | n/a                                                                    |
 
 ## Attribution
 

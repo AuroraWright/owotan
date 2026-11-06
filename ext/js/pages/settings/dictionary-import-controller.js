@@ -60,17 +60,6 @@ export class DictionaryImportController {
         this._purgeConfirmModal = null;
         /** @type {HTMLElement} */
         this._errorContainer = querySelectorNotNull(document, '#dictionary-error');
-        /** @type {[originalMessage: string, newMessage: string][]} */
-        this._errorToStringOverrides = [
-            [
-                'A mutation operation was attempted on a database that did not allow mutations.',
-                'Access to IndexedDB appears to be restricted. Firefox seems to require that the history preference is set to "Remember history" before IndexedDB use of any kind is allowed.',
-            ],
-            [
-                'The operation failed for reasons unrelated to the database itself and not covered by any other error code.',
-                'Unable to access IndexedDB due to a possibly corrupt user profile. Try using the "Refresh Firefox" feature to reset your user profile.',
-            ],
-        ];
         /** @type {string[]} */
         this._recommendedDictionaryQueue = [];
         /** @type {boolean} */
@@ -553,9 +542,7 @@ export class DictionaryImportController {
 
             for (const progress of [...progressContainers, ...recommendedProgressContainers]) { progress.hidden = false; }
 
-            const optionsFull = await this._settingsController.getOptionsFull();
             const importDetails = {
-                prefixWildcardsSupported: optionsFull.global.database.prefixWildcardsSupported,
                 yomitanVersion: chrome.runtime.getManifest().version,
             };
 
@@ -758,7 +745,7 @@ export class DictionaryImportController {
         const uniqueErrors = new Map();
         for (const error of errors) {
             log.error(error);
-            const errorString = this._errorToString(error);
+            const errorString = error.toString();
             let count = uniqueErrors.get(errorString);
             if (typeof count === 'undefined') {
                 count = 0;
@@ -803,22 +790,6 @@ export class DictionaryImportController {
             reader.onerror = () => reject(reader.error);
             reader.readAsArrayBuffer(file);
         });
-    }
-
-    /**
-     * @param {Error} error
-     * @returns {string}
-     */
-    _errorToString(error) {
-        const errorMessage = error.toString();
-
-        for (const [match, newErrorString] of this._errorToStringOverrides) {
-            if (errorMessage.includes(match)) {
-                return newErrorString;
-            }
-        }
-
-        return errorMessage;
     }
 
     /**
