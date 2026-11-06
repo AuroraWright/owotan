@@ -16,8 +16,8 @@
  */
 
 // Answers browser.runtime.sendNativeMessage from the extension. Safari does not let an extension read the
-// clipboard, so the extension asks the app extension, which can. The app extension also plays audio, which Safari
-// does not let a page play without a gesture (AudioPlayer). On macOS it also starts the app, which serves the
+// clipboard, so on macOS the extension asks the app extension, which can. The app extension also plays audio, which
+// Safari does not let a page play without a gesture (AudioPlayer). On macOS it also starts the app, which serves the
 // Yomitan API (AppDelegate.swift), when the extension needs it. On iOS it reads audio from android.db, which the app
 // keeps where the app extension can read it (SceneDelegate.swift).
 // dev/bin/build-safari-app.js puts this file in place of the one Xcode's converter generates.
@@ -28,16 +28,16 @@ import SafariServices
 import AppKit
 #else
 import SQLite3
-import UIKit
 #endif
 
 class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
-    // iOS asks the user each time the clipboard is read while it holds something another app copied, unless
-    // they allowed Yomitan to paste in Settings, and the clipboard monitor reads it several times a second.
-    // So what was read is kept until the clipboard changes; checking whether it changed does not ask.
+    #if os(macOS)
+    // The clipboard monitor reads the clipboard several times a second, so what was read is kept until the
+    // clipboard changes.
     private static let lock = NSLock()
     private static var text: (changeCount: Int, value: String)?
     private static var image: (changeCount: Int, value: String?)?
+    #endif
 
     // The app supports systems older than the constant, which use the same key.
     private static var messageKey: String {
@@ -58,10 +58,18 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 
         let response: [String: Any]
         switch message?["action"] as? String {
+        #if os(macOS)
         case "getClipboardText":
             response = ["text": Self.clipboardText()]
         case "getClipboardImage":
             response = ["image": Self.clipboardImage() ?? NSNull()]
+        #else
+        // iOS lets only the app in front read the clipboard, which the app extension never is, so it is always empty.
+        case "getClipboardText":
+            response = ["text": ""]
+        case "getClipboardImage":
+            response = ["image": NSNull()]
+        #endif
         case "playAudio":
             // Answered once the audio has stopped, as iOS suspends the app extension once it has answered.
             AudioPlayer.play(id: message?["id"] as? String ?? "", data: message?["data"] as? String ?? "", volume: message?["volume"] as? Double ?? 1, completion: respond)
@@ -85,25 +93,18 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         respond(response)
     }
 
+    #if os(macOS)
     private static func clipboardText() -> String {
         lock.lock()
         defer { lock.unlock() }
-        #if os(macOS)
         let pasteboard = NSPasteboard.general
         let changeCount = pasteboard.changeCount
         if let text, text.changeCount == changeCount { return text.value }
         let value = pasteboard.string(forType: .string) ?? ""
-        #else
-        let pasteboard = UIPasteboard.general
-        let changeCount = pasteboard.changeCount
-        if let text, text.changeCount == changeCount { return text.value }
-        let value = pasteboard.hasStrings ? (pasteboard.string ?? "") : ""
-        #endif
         text = (changeCount, value)
         return value
     }
 
-    #if os(macOS)
     /// Starts the app that holds this extension, without a window, to serve the Yomitan API on the port, or has
     /// the running app serve on it.
     private static func startApiServer(port: Int) -> [String: Any] {
@@ -145,13 +146,11 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         }
         return ["started": true]
     }
-    #endif
 
     /// The image in the clipboard as a PNG data URL.
     private static func clipboardImage() -> String? {
         lock.lock()
         defer { lock.unlock() }
-        #if os(macOS)
         let pasteboard = NSPasteboard.general
         let changeCount = pasteboard.changeCount
         if let image, image.changeCount == changeCount { return image.value }
@@ -159,16 +158,11 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         if data == nil, let tiff = pasteboard.data(forType: .tiff) {
             data = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
         }
-        #else
-        let pasteboard = UIPasteboard.general
-        let changeCount = pasteboard.changeCount
-        if let image, image.changeCount == changeCount { return image.value }
-        let data = pasteboard.hasImages ? pasteboard.image?.pngData() : nil
-        #endif
         let value = data.map { "data:image/png;base64," + $0.base64EncodedString() }
         image = (changeCount, value)
         return value
     }
+    #endif
 }
 
 /// Plays audio for the extension. Safari plays audio in a page only after a gesture in it has started audio, which a

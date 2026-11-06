@@ -1667,7 +1667,8 @@ export class Backend {
         this._yomitanApi.setServerUrl(options.general.yomitanApiServer);
         void this._yomitanApi.setEnabled(options.general.enableYomitanApi && enabled);
 
-        if (options.clipboard.enableBackgroundMonitor && enabled) {
+        // The clipboard can't be read on iOS, which hides the monitor's setting, but imported settings can still enable it
+        if (options.clipboard.enableBackgroundMonitor && enabled && this._environment.getInfo().platform.os !== 'ios') {
             this._clipboardMonitor.start();
         } else {
             this._clipboardMonitor.stop();
