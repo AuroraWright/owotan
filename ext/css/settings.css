@@ -146,6 +146,16 @@
     }
 }
 
+@media (min-width: 401px) and (max-width: 700px) {
+    /* A row whose label and control do not fit side by side puts the control under the label, as on narrower screens */
+    :root {
+        --settings-group-wrap: wrap;
+    }
+    .settings-item-inner.settings-item-inner-wrappable>.settings-item-left {
+        flex-basis: 8em;
+    }
+}
+
 @media (max-width: 400px) {
     :root {
         --settings-group-horizontal-margin: calc(var(--main-content-padding) * -1);
