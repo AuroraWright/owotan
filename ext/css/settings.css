@@ -1245,7 +1245,6 @@ button.fab-button>.icon-button-inner>.icon {
     display: flex;
     flex-flow: row wrap;
     align-items: stretch;
-    height: 2.75em;
     overflow: hidden;
     min-width: 0;
 }
@@ -1272,7 +1271,7 @@ button.fab-button>.icon-button-inner>.icon {
     align-items: center;
     justify-content: center;
     position: relative;
-    height: 100%;
+    height: 2.75em;
     padding: 0 1em;
 }
 .tab-inner::before {
