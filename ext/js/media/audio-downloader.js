@@ -569,7 +569,7 @@ export class AudioDownloader {
     /**
      * Lists Forvo's pronunciations of the term in the language, or of the reading when it has none, as the Yomichan
      * Forvo Server add-on for Anki does: those of speakers from countries where the language is spoken natively
-     * first, each the best rated first.
+     * first, each the best rated first, named by the speaker's gender, name and country.
      * @type {import('audio-downloader').GetInfoHandler}
      */
     async _getInfoForvo(term, reading, details, languageSummary) {
@@ -609,9 +609,11 @@ export class AudioDownloader {
         const getCountryOrder = ({country}) => (typeof country === 'string' && nativeCountries.has(country.toLowerCase()) ? 0 : 1);
         // Sorting keeps Forvo's order, by rating, among pronunciations of the same order.
         const pronunciations = [...responseJson.data.items].sort((a, b) => getCountryOrder(a) - getCountryOrder(b));
-        return pronunciations.map(({pathmp3, username, sex}) => {
+        return pronunciations.map(({pathmp3, username, sex, country}) => {
             const genderSymbol = sex === 'm' ? '♂' : (sex === 'f' ? '♀' : '');
-            return {type: 'url', url: pathmp3, name: `${genderSymbol}${username}`};
+            let name = `${genderSymbol}${username}`;
+            if (typeof country === 'string' && country.length > 0) { name += `, ${country}`; }
+            return {type: 'url', url: pathmp3, name};
         });
     }
 
