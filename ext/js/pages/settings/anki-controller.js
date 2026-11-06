@@ -43,6 +43,14 @@ export class AnkiController {
         this._modalController = modalController;
         /** @type {AnkiConnect} */
         this._ankiConnect = new AnkiConnect();
+        /** @type {import('settings').AnkiConnection} */
+        this._ankiConnection = 'ankiconnect';
+        /** @type {boolean} */
+        this._ankiEnabled = false;
+        /** @type {?import('api').AnkiMobileInfo} */
+        this._ankiMobileInfo = null;
+        /** @type {boolean} */
+        this._ankiMobileInfoRequested = false;
         /** @type {string} */
         this._language = 'ja';
         /** @type {SelectorObserver<AnkiCardController>} */
@@ -117,6 +125,8 @@ export class AnkiController {
         const ankiErrorLog = querySelectorNotNull(document, '#anki-error-log');
         /** @type {HTMLElement} */
         const newFormatButton = querySelectorNotNull(document, '#anki-cards-new-format button');
+        /** @type {HTMLButtonElement} */
+        const ankiMobileInfoButton = querySelectorNotNull(document, '#anki-mobile-info-button');
 
         this._ankiErrorMessageDetailsToggle.addEventListener('click', this._onAnkiErrorMessageDetailsToggleClick.bind(this), false);
         if (this._ankiEnableCheckbox !== null) {
@@ -138,13 +148,16 @@ export class AnkiController {
         ankiApiKeyInput.addEventListener('focus', this._onApiKeyInputFocus.bind(this));
         ankiApiKeyInput.addEventListener('blur', this._onApiKeyInputBlur.bind(this));
 
+        ankiMobileInfoButton.addEventListener('click', this._onAnkiMobileInfoButtonClick.bind(this), false);
+        document.addEventListener('visibilitychange', this._onVisibilityChange.bind(this), false);
+
         this._duplicateBehaviorSelect.addEventListener('change', this._onDuplicateBehaviorSelectChange.bind(this));
 
         await this._updateOptions();
         this._settingsController.on('optionsChanged', this._onOptionsChanged.bind(this));
 
         const onAnkiSettingChanged = () => { void this._updateOptions(); };
-        const nodes = [ankiApiKeyInput, ...document.querySelectorAll('[data-setting="anki.enable"]')];
+        const nodes = [ankiApiKeyInput, ...document.querySelectorAll('[data-setting="anki.enable"], [data-setting="anki.connection"]')];
         for (const node of nodes) {
             node.addEventListener('settingChanged', onAnkiSettingChanged);
         }
@@ -188,6 +201,11 @@ export class AnkiController {
      * @returns {Promise<string[]>}
      */
     async getModelFieldNames(model) {
+        if (this._ankiConnection === 'ankimobile') {
+            if (!this._ankiEnabled) { return []; }
+            const info = await this._getAnkiMobileInfo();
+            return [...(info.models.find(({name}) => name === model)?.fieldNames ?? [])];
+        }
         return await this._ankiConnect.getModelFieldNames(model);
     }
 
@@ -225,8 +243,11 @@ export class AnkiController {
         /** @type {?string} */
         let apiKey = anki.apiKey;
         if (apiKey === '') { apiKey = null; }
+        this._ankiConnection = anki.connection;
+        this._ankiEnabled = anki.enable;
+        document.documentElement.dataset.ankiConnection = anki.connection;
         this._ankiConnect.server = anki.server;
-        this._ankiConnect.enabled = anki.enable;
+        this._ankiConnect.enabled = anki.enable && anki.connection === 'ankiconnect';
         this._ankiConnect.apiKey = apiKey;
 
         this._language = language;
@@ -252,7 +273,8 @@ export class AnkiController {
      */
     _onAnkiEnableChanged({detail: {value}}) {
         if (this._ankiConnect.server === null) { return; }
-        this._ankiConnect.enabled = typeof value === 'boolean' && value;
+        this._ankiEnabled = typeof value === 'boolean' && value;
+        this._ankiConnect.enabled = this._ankiEnabled && this._ankiConnection === 'ankiconnect';
 
         for (const cardController of this._selectorObserver.datas()) {
             void cardController.updateAnkiState();
@@ -288,6 +310,49 @@ export class AnkiController {
         const normalizedMode = this._normalizeAnkiNoteGuiMode(mode);
         if (normalizedMode === null) { return; }
         void this._testAnkiNoteViewerSafe(normalizedMode);
+    }
+
+    /** */
+    async _onAnkiMobileInfoButtonClick() {
+        try {
+            await this._settingsController.application.api.requestAnkiMobileInfo();
+            this._ankiMobileInfoRequested = true;
+        } catch (e) {
+            this._showAnkiError(toError(e));
+        }
+    }
+
+    /**
+     * Reads the decks and note types for AnkiMobile again, which the copy of the collection or AnkiMobile gave.
+     */
+    reloadAnkiMobileInfo() {
+        this._ankiMobileInfo = null;
+        void this.getAnkiData();
+        for (const cardController of this._selectorObserver.datas()) {
+            void cardController.updateAnkiState();
+        }
+    }
+
+    /** */
+    _onVisibilityChange() {
+        // The app has what AnkiMobile gave it by the time the user comes back to Safari
+        if (document.visibilityState !== 'visible' || !this._ankiMobileInfoRequested) { return; }
+        this._ankiMobileInfoRequested = false;
+        this.reloadAnkiMobileInfo();
+    }
+
+    /**
+     * @returns {Promise<import('api').AnkiMobileInfo>}
+     * @throws {Error} If AnkiMobile has not given any.
+     */
+    async _getAnkiMobileInfo() {
+        if (this._ankiMobileInfo === null) {
+            this._ankiMobileInfo = await this._settingsController.application.api.getAnkiMobileInfo();
+        }
+        if (this._ankiMobileInfo === null) {
+            throw new Error('Load the decks and note types from AnkiMobile, or log in to copy the collection');
+        }
+        return this._ankiMobileInfo;
     }
 
     /**
@@ -462,7 +527,7 @@ export class AnkiController {
      */
     async _getDeckNames() {
         try {
-            const result = await this._ankiConnect.getDeckNames();
+            const result = await this._getDeckNamesFromConnection();
             this._sortStringArray(result);
             return [result, null];
         } catch (e) {
@@ -475,12 +540,30 @@ export class AnkiController {
      */
     async _getModelNames() {
         try {
-            const result = await this._ankiConnect.getModelNames();
+            const result = await this._getModelNamesFromConnection();
             this._sortStringArray(result);
             return [result, null];
         } catch (e) {
             return [[], toError(e)];
         }
+    }
+
+    /**
+     * @returns {Promise<string[]>}
+     */
+    async _getDeckNamesFromConnection() {
+        if (this._ankiConnection !== 'ankimobile') { return await this._ankiConnect.getDeckNames(); }
+        if (!this._ankiEnabled) { return []; }
+        return [...(await this._getAnkiMobileInfo()).deckNames];
+    }
+
+    /**
+     * @returns {Promise<string[]>}
+     */
+    async _getModelNamesFromConnection() {
+        if (this._ankiConnection !== 'ankimobile') { return await this._ankiConnect.getModelNames(); }
+        if (!this._ankiEnabled) { return []; }
+        return (await this._getAnkiMobileInfo()).models.map(({name}) => name);
     }
 
     /** */
@@ -496,10 +579,24 @@ export class AnkiController {
         /** @type {HTMLElement} */ (this._ankiErrorMessageDetailsContainer).hidden = true;
         /** @type {HTMLElement} */ (this._ankiErrorMessageDetailsToggle).hidden = true;
         /** @type {HTMLElement} */ (this._ankiErrorInvalidResponseInfo).hidden = true;
-        ankiErrorMessageNode.textContent = (this._ankiConnect.enabled ? 'Connected' : 'Not enabled');
+        ankiErrorMessageNode.textContent = this._getAnkiStatus();
         ankiErrorMessageNode.classList.remove('danger-text');
         /** @type {HTMLElement} */ (this._ankiErrorMessageDetailsNode).textContent = '';
         this._ankiError = null;
+    }
+
+    /**
+     * @returns {string}
+     */
+    _getAnkiStatus() {
+        if (!this._ankiEnabled) { return 'Not enabled'; }
+        if (this._ankiConnection !== 'ankimobile') { return 'Connected'; }
+        const info = this._ankiMobileInfo;
+        if (info === null) { return 'AnkiMobile'; }
+        const deckCount = info.deckNames.length;
+        const modelCount = info.models.length;
+        const source = info.source === 'sync-server' ? 'the copy of the collection' : 'AnkiMobile';
+        return `${deckCount} ${deckCount === 1 ? 'deck' : 'decks'} and ${modelCount} ${modelCount === 1 ? 'note type' : 'note types'} from ${source}`;
     }
 
     /**

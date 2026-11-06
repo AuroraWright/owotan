@@ -28,6 +28,22 @@ import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
 
+/**
+ * How long after the page is shown again AnkiMobile is given to report that it added a note, in milliseconds.
+ */
+const ANKI_MOBILE_RETURN_DELAY = 1500;
+
+/**
+ * How long Safari's prompt to open AnkiMobile is given before the note counts as not sent, in milliseconds.
+ */
+const ANKI_MOBILE_OPEN_TIMEOUT = 30000;
+
+/**
+ * How often the page checks whether iOS suspended it, in milliseconds, and the pause that means it did.
+ */
+const ANKI_MOBILE_SUSPEND_CHECK_INTERVAL = 500;
+const ANKI_MOBILE_SUSPEND_PAUSE = 2000;
+
 export class DisplayAnki {
     /**
      * @param {import('./display.js').Display} display
@@ -80,6 +96,8 @@ export class DisplayAnki {
         this._duplicateScopeCheckAllModels = false;
         /** @type {import('settings').AnkiDuplicateBehavior} */
         this._duplicateBehavior = 'new';
+        /** @type {import('settings').AnkiConnection} */
+        this._ankiConnection = 'ankiconnect';
         /** @type {import('settings').AnkiScreenshotFormat} */
         this._screenshotFormat = 'png';
         /** @type {number} */
@@ -202,6 +220,7 @@ export class DisplayAnki {
             },
             dictionaries,
             anki: {
+                connection,
                 tags,
                 targetTags,
                 duplicateScope,
@@ -228,7 +247,9 @@ export class DisplayAnki {
         this._displayTagsAndFlags = displayTagsAndFlags;
         this._duplicateScope = duplicateScope;
         this._duplicateScopeCheckAllModels = duplicateScopeCheckAllModels;
-        this._duplicateBehavior = duplicateBehavior;
+        this._ankiConnection = connection;
+        // AnkiMobile cannot change notes
+        this._duplicateBehavior = connection === 'ankimobile' && duplicateBehavior === 'overwrite' ? 'new' : duplicateBehavior;
         this._screenshotFormat = format;
         this._screenshotQuality = quality;
         this._scanLength = scanLength;
@@ -922,6 +943,10 @@ export class DisplayAnki {
      * @param {number} dictionaryEntryIndex
      */
     async _addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex) {
+        if (this._ankiConnection === 'ankimobile') {
+            await this._addAnkiMobileNote(note, allErrors, button);
+            return;
+        }
         let noteId = null;
         let addNoteOkay = false;
         try {
@@ -958,6 +983,97 @@ export class DisplayAnki {
                 }
             }
         }
+    }
+
+    /**
+     * AnkiMobile adds the note once the user allows Safari to open it, then opens the page again if it can
+     * (Backend), which Safari brings back without reloading it.
+     * @param {import('anki').Note} note
+     * @param {Error[]} allErrors
+     * @param {HTMLButtonElement} button
+     */
+    async _addAnkiMobileNote(note, allErrors, button) {
+        const {api} = this._display.application;
+        try {
+            const token = await api.addAnkiMobileNote(note);
+            // AnkiMobile cannot open extension pages again, and Safari neither hides nor suspends them while it is
+            // open, so whether it added the note is not known. It shows its own error if it did not.
+            if (token === null) {
+                button.disabled = false;
+                return;
+            }
+            /** @type {'added'|'returned'|'not-opened'} */
+            const result = await Promise.race([
+                api.waitForAnkiMobileNote(token).then((added) => (added ? 'added' : 'returned')),
+                this._waitForAnkiMobileReturn(),
+            ]);
+            switch (result) {
+                case 'added':
+                    this._updateSaveButtonForDuplicateBehavior(button, [INVALID_NOTE_ID]);
+                    break;
+                case 'returned':
+                    allErrors.push(new Error('AnkiMobile did not add the note'));
+                    break;
+                case 'not-opened':
+                    allErrors.push(new Error('AnkiMobile was not opened'));
+                    break;
+            }
+        } catch (e) {
+            allErrors.length = 0;
+            allErrors.push(toError(e));
+        }
+        // The button is enabled again after a while only if adding failed by then, which it may not have
+        if (allErrors.length > 0) {
+            button.disabled = false;
+        }
+    }
+
+    /**
+     * Waits for the user to come back to this page from AnkiMobile.
+     * @returns {Promise<'returned'|'not-opened'>} Whether the page was shown again after AnkiMobile was, or
+     *   AnkiMobile was not opened in time.
+     */
+    _waitForAnkiMobileReturn() {
+        return new Promise((resolve) => {
+            const eventListeners = new EventListenerCollection();
+            let left = false;
+            /** @type {?import('core').Timeout} */
+            let returnTimer = null;
+            /**
+             * @param {'returned'|'not-opened'} result
+             */
+            const finish = (result) => {
+                eventListeners.removeAllEventListeners();
+                clearInterval(checkTimer);
+                if (returnTimer !== null) { clearTimeout(returnTimer); }
+                resolve(result);
+            };
+            const onReturn = () => {
+                if (returnTimer !== null) { return; }
+                returnTimer = setTimeout(() => finish('returned'), ANKI_MOBILE_RETURN_DELAY);
+            };
+            // iOS suspends the page while AnkiMobile is open, and tells it that it was hidden only once it is shown
+            // again, maybe after running its timers, so a pause in the timer also means that the page was left
+            const start = Date.now();
+            let lastCheck = start;
+            const checkTimer = setInterval(() => {
+                const now = Date.now();
+                if (now - lastCheck > ANKI_MOBILE_SUSPEND_PAUSE) { left = true; }
+                lastCheck = now;
+                if (left) {
+                    if (document.visibilityState === 'visible') { onReturn(); }
+                } else if (now - start >= ANKI_MOBILE_OPEN_TIMEOUT) {
+                    finish('not-opened');
+                }
+            }, ANKI_MOBILE_SUSPEND_CHECK_INTERVAL);
+            eventListeners.addEventListener(document, 'visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    left = true;
+                } else if (left) {
+                    onReturn();
+                }
+            });
+        });
     }
 
     /**

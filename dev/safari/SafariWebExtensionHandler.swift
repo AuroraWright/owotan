@@ -18,8 +18,8 @@
 // Answers browser.runtime.sendNativeMessage from the extension. Safari does not let an extension read the
 // clipboard, so on macOS the extension asks the app extension, which can. The app extension also plays audio, which
 // Safari does not let a page play without a gesture (AudioPlayer). On macOS it also starts the app, which serves the
-// Yomitan API (AppDelegate.swift), when the extension needs it. On iOS it reads audio from android.db, which the app
-// keeps where the app extension can read it (SceneDelegate.swift).
+// Yomitan API (AppDelegate.swift), when the extension needs it. On iOS it reads audio from android.db, and the decks
+// and note types that AnkiMobile gave, which the app keeps where the app extension can read them (SceneDelegate.swift).
 // dev/bin/build-safari-app.js puts this file in place of the one Xcode's converter generates.
 
 import AVFoundation
@@ -85,6 +85,10 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             response = LocalAudioDatabase.entries(term: message?["term"] as? String ?? "", reading: message?["reading"] as? String ?? "")
         case "getLocalAudio":
             response = LocalAudioDatabase.audio(source: message?["source"] as? String ?? "", file: message?["file"] as? String ?? "")
+        case "getAnkiMobileInfo":
+            response = AnkiMobileInfo.read()
+        case "getAnkiMobileInfoCallbackUrl":
+            response = AnkiMobileInfo.callbackUrl()
         #endif
         default:
             response = ["error": "Unsupported message"]
@@ -252,6 +256,47 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
 }
 
 #if os(iOS)
+/// The storage that the app shares with this app extension.
+enum SharedStorage {
+    /// This app extension's identifier is the app's followed by its own name.
+    static func appIdentifier() -> String? {
+        guard let extensionIdentifier = Bundle.main.bundleIdentifier, let dot = extensionIdentifier.lastIndex(of: ".") else { return nil }
+        return String(extensionIdentifier[..<dot])
+    }
+
+    /// The group's identifier is the app's, with "group." before it.
+    static func directory() -> URL? {
+        guard let appIdentifier = appIdentifier() else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.\(appIdentifier)")
+    }
+}
+
+/// The decks and note types that AnkiMobile gives for an `infoForAdding` link. AnkiMobile puts them on the
+/// pasteboard and opens the link's `x-success`, which is the app's (SceneDelegate.swift), as only the app in front
+/// can read the pasteboard. The app keeps them in the storage that it shares with this app extension.
+enum AnkiMobileInfo {
+    static let fileName = "ankimobile-info.json"
+
+    /// AnkiMobile's JSON, as it gave it.
+    static func read() -> [String: Any] {
+        guard let url = SharedStorage.directory()?.appendingPathComponent(fileName) else {
+            return ["error": "The storage shared with the app was not found"]
+        }
+        guard let data = try? Data(contentsOf: url), let info = String(data: data, encoding: .utf8) else {
+            return ["info": NSNull()]
+        }
+        return ["info": info]
+    }
+
+    /// The app's URL scheme is its identifier (build-safari-app.js).
+    static func callbackUrl() -> [String: Any] {
+        guard let appIdentifier = SharedStorage.appIdentifier() else {
+            return ["error": "The app was not found"]
+        }
+        return ["callbackUrl": "\(appIdentifier)://ankimobile-info"]
+    }
+}
+
 /// Reads android.db, which the Local Audio Server for Yomichan add-on for Anki creates. It holds the add-on's table
 /// of entries, and the audio files in a table named android. The app keeps a copy of the one that the user puts in
 /// its folder in the Files app in the storage that it shares with this app extension (SceneDelegate.swift).
@@ -290,13 +335,6 @@ enum LocalAudioDatabase {
         }
     }
 
-    /// The storage that the app shares with this app extension. Its group's identifier is the app's, with
-    /// "group." before it, and this app extension's identifier is the app's followed by its own name.
-    static func sharedDirectory() -> URL? {
-        guard let extensionIdentifier = Bundle.main.bundleIdentifier, let dot = extensionIdentifier.lastIndex(of: ".") else { return nil }
-        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.\(extensionIdentifier[..<dot])")
-    }
-
     private static func query(_ sql: String, _ parameters: [String], _ read: (OpaquePointer) -> [String: Any]) -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
@@ -318,7 +356,7 @@ enum LocalAudioDatabase {
 
     /// Opens the database, again once the app has replaced it.
     private static func open() -> OpaquePointer? {
-        guard let url = sharedDirectory()?.appendingPathComponent(fileName),
+        guard let url = SharedStorage.directory()?.appendingPathComponent(fileName),
               let fileNumber = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.systemFileNumber] as? Int else {
             close()
             return nil

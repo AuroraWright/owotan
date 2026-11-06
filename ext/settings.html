@@ -1811,6 +1811,7 @@
                 Yomitan supports automatic flashcard creation for <a href="https://apps.ankiweb.net/" target="_blank" rel="noopener noreferrer">Anki</a>,
                 a free application designed to assist in remembering information.
                 This feature requires installation of the <a href="https://foosoft.net/projects/anki-connect/" target="_blank" rel="noopener noreferrer">AnkiConnect</a> plugin.
+                <span data-show-for-os="ios">On iPhone and iPad, Yomitan can add notes through AnkiMobile instead.</span>
                 <br>
                 See the <a href="https://yomitan.wiki/anki/" target="_blank" rel="noopener noreferrer">Yomitan wiki</a> for a setup guide.
             </p>
@@ -1855,7 +1856,95 @@
                 </p>
             </div>
         </div>
-        <div class="settings-item">
+        <div class="settings-item" data-show-for-os="ios"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label">Connection</div>
+                <div class="settings-item-description">
+                    AnkiMobile adds notes without AnkiConnect, but Safari asks before opening it for each note.
+                    <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
+                </div>
+            </div>
+            <div class="settings-item-right">
+                <select data-setting="anki.connection">
+                    <option value="ankiconnect">AnkiConnect</option>
+                    <option value="ankimobile">AnkiMobile</option>
+                </select>
+            </div>
+        </div>
+            <div class="settings-item-children more" hidden>
+                <p>
+                    AnkiMobile adds each note without showing it, then opens the page again.
+                    It cannot tell Yomitan which notes it already has, so Yomitan can keep a copy of the collection from your sync server for that.
+                    It cannot change notes or suspend cards either.
+                    Audio, screenshots and images are only added to fields that have nothing else in them.
+                </p>
+                <p>
+                    <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
+                </p>
+            </div>
+        </div>
+        <div class="settings-item" data-show-for-anki-connection="ankimobile"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label">Decks and note types</div>
+                <div class="settings-item-description">AnkiMobile gives them to the Yomitan app. Come back to Safari once the app has them.</div>
+            </div>
+            <div class="settings-item-right">
+                <button type="button" class="low-emphasis" id="anki-mobile-info-button">Load from AnkiMobile</button>
+            </div>
+        </div></div>
+        <div class="settings-item" data-show-for-anki-connection="ankimobile">
+            <div class="settings-item-inner settings-item-inner-wrappable">
+                <div class="settings-item-left">
+                    <div class="settings-item-label">Copy of the collection</div>
+                    <div class="settings-item-description">
+                        Yomitan can read your collection from a sync server to show which notes you have, and to list the decks and note types.
+                        <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
+                    </div>
+                    <div class="settings-item-description" id="anki-sync-status">Not logged in</div>
+                </div>
+                <div class="settings-item-right anki-sync-buttons">
+                    <button type="button" class="low-emphasis" id="anki-sync-update-button" hidden>Update</button>
+                    <button type="button" class="low-emphasis" id="anki-sync-logout-button" hidden>Log out</button>
+                </div>
+            </div>
+            <div class="settings-item-children more" hidden>
+                <p>
+                    Yomitan reads the collection the way Anki syncs it, then stops before anything is changed.
+                    It keeps the first field of each note and the deck of each card, and checks for changes every few minutes while you look up words.
+                    Reading the collection stops a sync that AnkiMobile is doing at the same moment, which AnkiMobile can then do again.
+                </p>
+                <p>
+                    Notes that AnkiMobile adds count as duplicates right away, and Yomitan finds them in the copy once AnkiMobile has synced.
+                    Your password is only used to log in.
+                </p>
+                <p>
+                    <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
+                </p>
+            </div>
+        </div>
+        <div class="settings-item" data-show-for-anki-connection="ankimobile"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label">Sync server</div>
+                <div class="settings-item-description">The URL of the sync server that AnkiMobile syncs with, as set in AnkiMobile.</div>
+            </div>
+            <div class="settings-item-right">
+                <input type="text" inputmode="url" placeholder="https://example.com/" spellcheck="false" autocomplete="off" autocapitalize="off" data-setting="anki.syncServer" id="anki-sync-server-input">
+            </div>
+        </div></div>
+        <div class="settings-item" data-show-for-anki-connection="ankimobile" id="anki-sync-login"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label">Log in</div>
+                <div class="settings-item-description">With your username and password on the sync server.</div>
+            </div>
+            <div class="settings-item-right anki-sync-login">
+                <form class="anki-sync-login-form" id="anki-sync-login-form">
+                    <input type="text" placeholder="Username" spellcheck="false" autocomplete="username" autocapitalize="off" id="anki-sync-username-input">
+                    <input type="password" placeholder="Password" autocomplete="current-password" id="anki-sync-password-input">
+                    <button type="submit" class="low-emphasis" id="anki-sync-login-button">Log in</button>
+                </form>
+            </div>
+        </div></div>
+        <div class="settings-item" data-show-for-anki-connection="ankiconnect">
             <div class="settings-item-inner settings-item-inner-wrappable">
                 <div class="settings-item-left">
                     <div class="settings-item-label">AnkiConnect server address</div>
@@ -1892,7 +1981,7 @@
                 >
             </div>
         </div></div>
-        <div class="settings-item advanced-only"><div class="settings-item-inner settings-item-inner-wrappable">
+        <div class="settings-item advanced-only" data-show-for-anki-connection="ankiconnect"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-label">API key</div>
                 <div class="settings-item-description">Pass a secret value to AnkiConnect API calls.</div>
@@ -2079,7 +2168,7 @@
                 </p>
             </div>
         </div>
-        <div class="settings-item advanced-only"><div class="settings-item-inner">
+        <div class="settings-item advanced-only" data-show-for-anki-connection="ankiconnect"><div class="settings-item-inner">
             <div class="settings-item-left">
                 <div class="settings-item-label">Suspend new cards</div>
                 <div class="settings-item-description">New cards will be suspended when a note is added.</div>
@@ -2088,7 +2177,7 @@
                 <label class="toggle"><input type="checkbox" data-setting="anki.suspendNewCards"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
             </div>
         </div></div>
-        <div class="settings-item advanced-only">
+        <div class="settings-item advanced-only" data-show-for-anki-connection="ankiconnect">
             <div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-label">Note viewer window</div>
@@ -2121,7 +2210,7 @@
                 </p>
             </div>
         </div>
-        <div class="settings-item advanced-only">
+        <div class="settings-item advanced-only" data-show-for-anki-connection="ankiconnect">
             <div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-label">
@@ -2157,7 +2246,7 @@
                 </p>
             </div>
         </div>
-        <div class="settings-item advanced-only"><div class="settings-item-inner">
+        <div class="settings-item advanced-only" data-show-for-anki-connection="ankiconnect"><div class="settings-item-inner">
             <div class="settings-item-left">
                 <div class="settings-item-label">Force Anki sync on adding card</div>
                 <div class="settings-item-description">
@@ -2168,7 +2257,7 @@
                 <label class="toggle"><input type="checkbox" data-setting="anki.forceSync"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
             </div>
         </div></div>
-        <div class="settings-item advanced-only" id="anki-target-tags-option" hidden><div class="settings-item-inner settings-item-inner-wrappable">
+        <div class="settings-item advanced-only" id="anki-target-tags-option" hidden data-show-for-anki-connection="ankiconnect"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-label">Target tags</div>
                 <div class="settings-item-description">List of space or comma separated tags.</div>

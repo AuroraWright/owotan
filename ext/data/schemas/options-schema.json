@@ -994,6 +994,8 @@
                                 "type": "object",
                                 "required": [
                                     "enable",
+                                    "connection",
+                                    "syncServer",
                                     "server",
                                     "tags",
                                     "screenshot",
@@ -1016,6 +1018,15 @@
                                     "enable": {
                                         "type": "boolean",
                                         "default": false
+                                    },
+                                    "connection": {
+                                        "type": "string",
+                                        "enum": ["ankiconnect", "ankimobile"],
+                                        "default": "ankiconnect"
+                                    },
+                                    "syncServer": {
+                                        "type": "string",
+                                        "default": ""
                                     },
                                     "server": {
                                         "type": "string",

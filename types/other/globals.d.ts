@@ -17,6 +17,22 @@
 
 declare global {
     function clearTimeout(timeoutId: NodeJS.Timeout | string | number | undefined): void;
+
+    /** The part of the Navigation API that TypeScript's library does not have yet. */
+    interface Window {
+        navigation?: Navigation;
+    }
+
+    interface Navigation {
+        readonly currentEntry: NavigationHistoryEntry | null;
+        entries(): NavigationHistoryEntry[];
+        back(): {committed: Promise<NavigationHistoryEntry>, finished: Promise<NavigationHistoryEntry>};
+    }
+
+    interface NavigationHistoryEntry {
+        readonly url: string | null;
+        readonly index: number;
+    }
 }
 
 export { };

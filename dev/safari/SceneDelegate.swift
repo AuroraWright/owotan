@@ -16,7 +16,8 @@
  */
 
 // The iOS app's scene delegate, which also makes android.db, which the user copies to the app's folder in the Files
-// app, available to the app extension, which reads audio from it (SafariWebExtensionHandler.swift).
+// app, available to the app extension, which reads audio from it (SafariWebExtensionHandler.swift). It also keeps the
+// decks and note types that AnkiMobile gives when it opens the app's link, for the app extension.
 // dev/bin/build-safari-app.js puts this file in place of the one Xcode's converter generates.
 
 import UIKit
@@ -27,6 +28,27 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let _ = (scene as? UIWindowScene) else { return }
+        openUrls(connectionOptions.urlContexts)
+    }
+
+    func scene(_ scene: UIScene, openURLContexts urlContexts: Set<UIOpenURLContext>) {
+        openUrls(urlContexts)
+    }
+
+    private func openUrls(_ urlContexts: Set<UIOpenURLContext>) {
+        for context in urlContexts where context.url.host == "ankimobile-info" {
+            // The window is set up after the scene connects
+            DispatchQueue.main.async {
+                self.showMessage(AnkiMobileInfoStorage.save())
+            }
+        }
+    }
+
+    private func showMessage(_ message: String) {
+        guard let viewController = window?.rootViewController else { return }
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        viewController.present(alert, animated: true)
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
@@ -75,5 +97,32 @@ enum LocalAudioStorage {
                 try? fileManager.removeItem(at: newCopy)
             }
         }
+    }
+}
+
+/// Keeps the decks and note types that AnkiMobile puts on the pasteboard for an `infoForAdding` link, before it opens
+/// the app's link, where the app extension reads them (SafariWebExtensionHandler.swift).
+enum AnkiMobileInfoStorage {
+    private static let fileName = "ankimobile-info.json"
+    private static let pasteboardType = "net.ankimobile.json"
+
+    /// Returns what to tell the user.
+    static func save() -> String {
+        // iOS asks the user whether to allow the app to read what another app put on the pasteboard
+        guard let data = UIPasteboard.general.data(forPasteboardType: pasteboardType) else {
+            return "AnkiMobile did not give its decks and note types."
+        }
+        guard
+            let bundleIdentifier = Bundle.main.bundleIdentifier,
+            let shared = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.\(bundleIdentifier)")
+        else {
+            return "The decks and note types could not be saved."
+        }
+        do {
+            try data.write(to: shared.appendingPathComponent(fileName), options: .atomic)
+        } catch {
+            return "The decks and note types could not be saved: \(error.localizedDescription)"
+        }
+        return "Yomitan has the decks and note types from AnkiMobile. You can go back to Safari."
     }
 }

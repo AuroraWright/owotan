@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {ANKI_MOBILE_ADDED_HASH_PREFIX} from '../comm/anki-mobile.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {log} from '../core/log.js';
@@ -171,6 +172,10 @@ export class Frontend {
         this._textScanner.prepare();
 
         window.addEventListener('resize', this._onResize.bind(this), false);
+        if (this._pageType === 'web' && window === window.parent) {
+            window.addEventListener('hashchange', this._onHashChange.bind(this), false);
+            this._checkAnkiMobileNoteAdded(null);
+        }
         addFullscreenChangeEventListener(this._updatePopup.bind(this));
 
         const {visualViewport} = window;
@@ -343,6 +348,42 @@ export class Frontend {
      */
     _onResize() {
         void this._updatePopupPosition();
+    }
+
+    /**
+     * @param {HashChangeEvent} e
+     */
+    _onHashChange(e) {
+        this._checkAnkiMobileNoteAdded(e.oldURL);
+    }
+
+    /**
+     * AnkiMobile opens the page again with a fragment that has a token once it added a note (Backend), and Safari
+     * changes the page's fragment if it is still open, or loads the page again if not.
+     * @param {?string} previousUrl The URL to put back, or null to remove the fragment.
+     */
+    _checkAnkiMobileNoteAdded(previousUrl) {
+        const {hash} = location;
+        if (!hash.startsWith(ANKI_MOBILE_ADDED_HASH_PREFIX)) { return; }
+        const token = hash.substring(ANKI_MOBILE_ADDED_HASH_PREFIX.length);
+        void this._application.api.ankiMobileNoteAdded(token);
+
+        // Going back removes the history entry that the fragment added, so that Back leaves the page
+        const navigation = typeof window.navigation !== 'undefined' ? window.navigation : null;
+        if (previousUrl !== null && navigation !== null && navigation.currentEntry !== null) {
+            const previousEntry = navigation.entries()[navigation.currentEntry.index - 1];
+            if (typeof previousEntry !== 'undefined' && previousEntry.url === previousUrl) {
+                void navigation.back();
+                return;
+            }
+        }
+        let url = previousUrl;
+        if (url === null) {
+            const currentUrl = new URL(location.href);
+            currentUrl.hash = '';
+            url = currentUrl.href;
+        }
+        history.replaceState(history.state, '', url);
     }
 
     /** @type {import('extension').ChromeRuntimeOnMessageCallback<import('application').ApiMessageAny>} */

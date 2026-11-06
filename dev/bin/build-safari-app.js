@@ -117,6 +117,9 @@ const iosAppInfoPath = path.join(appDirectory, appName, 'iOS (App)', 'Info.plist
 for (const key of ['UIFileSharingEnabled', 'LSSupportsOpeningDocumentsInPlace']) {
     run('plutil', ['-replace', key, '-bool', 'YES', iosAppInfoPath]);
 }
+// AnkiMobile gives its decks and note types to an app, by opening the app's link (SceneDelegate.swift). The link's
+// scheme is the app's identifier, so that builds with other identifiers do not take each other's links.
+run('plutil', ['-replace', 'CFBundleURLTypes', '-json', '[{"CFBundleURLName": "$(PRODUCT_BUNDLE_IDENTIFIER)", "CFBundleURLSchemes": ["$(PRODUCT_BUNDLE_IDENTIFIER)"]}]', iosAppInfoPath]);
 // The app extension plays audio for the extension (SafariWebExtensionHandler.swift). iOS runs it in the background,
 // where only a process with the background mode for audio can start audio.
 run('plutil', ['-replace', 'UIBackgroundModes', '-json', '["audio"]', path.join(appDirectory, appName, 'iOS (Extension)', 'Info.plist')]);

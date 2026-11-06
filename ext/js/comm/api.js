@@ -114,6 +114,44 @@ export class API {
     }
 
     /**
+     * @param {import('api').ApiParam<'addAnkiMobileNote', 'note'>} note
+     * @returns {Promise<import('api').ApiReturn<'addAnkiMobileNote'>>}
+     */
+    addAnkiMobileNote(note) {
+        return this._invoke('addAnkiMobileNote', {note});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'waitForAnkiMobileNote', 'token'>} token
+     * @returns {Promise<import('api').ApiReturn<'waitForAnkiMobileNote'>>}
+     */
+    waitForAnkiMobileNote(token) {
+        return this._invoke('waitForAnkiMobileNote', {token});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'ankiMobileNoteAdded', 'token'>} token
+     * @returns {Promise<import('api').ApiReturn<'ankiMobileNoteAdded'>>}
+     */
+    ankiMobileNoteAdded(token) {
+        return this._invoke('ankiMobileNoteAdded', {token});
+    }
+
+    /**
+     * @returns {Promise<import('api').ApiReturn<'getAnkiMobileInfo'>>}
+     */
+    getAnkiMobileInfo() {
+        return this._invoke('getAnkiMobileInfo', void 0);
+    }
+
+    /**
+     * @returns {Promise<import('api').ApiReturn<'requestAnkiMobileInfo'>>}
+     */
+    requestAnkiMobileInfo() {
+        return this._invoke('requestAnkiMobileInfo', void 0);
+    }
+
+    /**
      * @param {import('api').ApiParam<'updateAnkiNote', 'noteWithId'>} noteWithId
      * @returns {Promise<import('api').ApiReturn<'updateAnkiNote'>>}
      */

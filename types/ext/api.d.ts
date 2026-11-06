@@ -44,6 +44,18 @@ import type {
     ApiParamsAny as BaseApiParamsAny,
 } from './api-map';
 
+export type AnkiMobileInfo = {
+    deckNames: string[];
+    models: AnkiMobileModel[];
+    /** Whether they come from AnkiMobile, or from the copy of the collection from the sync server. */
+    source: 'ankimobile' | 'sync-server';
+};
+
+export type AnkiMobileModel = {
+    name: string;
+    fieldNames: string[];
+};
+
 export type FindTermsDetails = {
     deinflect?: boolean;
     primaryReading?: string;
@@ -178,6 +190,37 @@ type ApiSurface = {
             note: Anki.Note;
         };
         return: Anki.NoteId | null;
+    };
+    /** Opens AnkiMobile to add a note, and gives a token to wait for it with, or null if it cannot be waited for. */
+    addAnkiMobileNote: {
+        params: {
+            note: Anki.Note;
+        };
+        return: string | null;
+    };
+    /** Whether AnkiMobile added the note, which is false if it did not report it in time. */
+    waitForAnkiMobileNote: {
+        params: {
+            token: string;
+        };
+        return: boolean;
+    };
+    /** Sent by the content script once AnkiMobile opened the page again after adding a note. */
+    ankiMobileNoteAdded: {
+        params: {
+            token: string;
+        };
+        return: void;
+    };
+    /** The decks and note types that AnkiMobile last gave, or null if it has not. */
+    getAnkiMobileInfo: {
+        params: void;
+        return: AnkiMobileInfo | null;
+    };
+    /** Opens AnkiMobile to ask for its decks and note types, which it gives to the app. */
+    requestAnkiMobileInfo: {
+        params: void;
+        return: void;
     };
     updateAnkiNote: {
         params: {

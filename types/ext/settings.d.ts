@@ -294,8 +294,14 @@ export type ParsingOptions = {
     useAllFrequencyDictionaries: boolean;
 };
 
+/** AnkiMobile, which iOS has instead of AnkiConnect, adds notes through its URL scheme. */
+export type AnkiConnection = 'ankiconnect' | 'ankimobile';
+
 export type AnkiOptions = {
     enable: boolean;
+    connection: AnkiConnection;
+    /** The URL of the sync server that the copy of the collection is read from, or an empty string if there is none. */
+    syncServer: string;
     server: string;
     tags: string[];
     screenshot: AnkiScreenshotOptions;

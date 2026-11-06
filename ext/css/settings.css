@@ -2738,6 +2738,27 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     display: none;
 }
 
+.anki-sync-login-form,
+.settings-item-right.anki-sync-buttons {
+    display: flex;
+    flex-flow: column nowrap;
+    align-items: flex-end;
+    gap: 0.5em;
+}
+.settings-item-right.anki-sync-buttons,
+.settings-item-right.anki-sync-login {
+    max-height: none;
+}
+.anki-sync-buttons>button {
+    white-space: nowrap;
+}
+
+:root:not([data-anki-connection]) [data-show-for-anki-connection]:not([data-show-for-anki-connection~=ankiconnect]),
+:root[data-anki-connection=ankiconnect] [data-show-for-anki-connection]:not([data-show-for-anki-connection~=ankiconnect]),
+:root[data-anki-connection=ankimobile] [data-show-for-anki-connection]:not([data-show-for-anki-connection~=ankimobile]) {
+    display: none;
+}
+
 :root[data-manifest-version=unknown] [data-show-for-manifest-version],
 :root[data-manifest-version=unknown] [data-hide-for-manifest-version],
 :root[data-manifest-version='2'] [data-show-for-manifest-version]:not([data-show-for-manifest-version~='2']),

@@ -17,6 +17,8 @@
  */
 import {AccessibilityController} from '../accessibility/accessibility-controller.js';
 import {AnkiConnect} from '../comm/anki-connect.js';
+import {ANKI_MOBILE_ADDED_HASH_PREFIX, AnkiMobile} from '../comm/anki-mobile.js';
+import {getAnkiPlatformName} from '../comm/anki-sync-client.js';
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {ClipboardReader} from '../comm/clipboard-reader.js';
 import {Mecab} from '../comm/mecab.js';
@@ -24,10 +26,12 @@ import {YomitanApi} from '../comm/yomitan-api.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {fetchText} from '../core/fetch-utilities.js';
+import {parseJson} from '../core/json.js';
 import {logErrorLevelToNumber} from '../core/log-utilities.js';
 import {log} from '../core/log.js';
 import {isObjectNotArray} from '../core/object-utilities.js';
-import {clone, deferPromise, promiseTimeout} from '../core/utilities.js';
+import {clone, deferPromise, generateId, promiseTimeout} from '../core/utilities.js';
+import {AnkiCollectionCopy} from '../data/anki-collection-copy.js';
 import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid, mediaFileNameHashOrTimestamp} from '../data/anki-util.js';
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {OptionsUtil} from '../data/options-util.js';
@@ -48,6 +52,17 @@ import {RequestBuilder} from './request-builder.js';
 import {injectStylesheet} from './script-manager.js';
 
 /**
+ * How long a note sent to AnkiMobile is waited for, in milliseconds.
+ */
+const ANKI_MOBILE_NOTE_TIMEOUT = 5 * 60 * 1000;
+
+/**
+ * How long after the copy of the collection was checked it is not checked again, in milliseconds. Checking is
+ * cheap, and the copy is only updated if the collection changed.
+ */
+const ANKI_COLLECTION_COPY_CHECK_INTERVAL = 5 * 60 * 1000;
+
+/**
  * This class controls the core logic of the extension, including API calls
  * and various forms of communication between browser tabs and external applications.
  */
@@ -62,6 +77,21 @@ export class Backend {
         this._environment = new Environment();
         /** @type {AnkiConnect} */
         this._anki = new AnkiConnect();
+        /** @type {AnkiMobile} */
+        this._ankiMobile = new AnkiMobile();
+        /** @type {import('settings').AnkiConnection} */
+        this._ankiConnection = 'ankiconnect';
+        /** @type {boolean} */
+        this._ankiEnabled = false;
+        /** @type {boolean} */
+        this._ankiAllowDuplicates = true;
+        /** @type {?AnkiCollectionCopy} */
+        this._ankiCollectionCopy = null;
+        /**
+         * The notes sent to AnkiMobile, by the token in the link it opens once it added them, with whether it did.
+         * @type {Map<string, import('core').DeferredPromiseDetails<boolean>>}
+         */
+        this._ankiMobileNotes = new Map();
         /** @type {Mecab} */
         this._mecab = new Mecab();
 
@@ -160,6 +190,11 @@ export class Backend {
             ['getAnkiConnectVersion',        this._onApiGetAnkiConnectVersion.bind(this)],
             ['isAnkiConnected',              this._onApiIsAnkiConnected.bind(this)],
             ['addAnkiNote',                  this._onApiAddAnkiNote.bind(this)],
+            ['addAnkiMobileNote',            this._onApiAddAnkiMobileNote.bind(this)],
+            ['waitForAnkiMobileNote',        this._onApiWaitForAnkiMobileNote.bind(this)],
+            ['ankiMobileNoteAdded',          this._onApiAnkiMobileNoteAdded.bind(this)],
+            ['getAnkiMobileInfo',            this._onApiGetAnkiMobileInfo.bind(this)],
+            ['requestAnkiMobileInfo',        this._onApiRequestAnkiMobileInfo.bind(this)],
             ['updateAnkiNote',               this._onApiUpdateAnkiNote.bind(this)],
             ['getAnkiNoteInfo',              this._onApiGetAnkiNoteInfo.bind(this)],
             ['injectAnkiNoteMedia',          this._onApiInjectAnkiNoteMedia.bind(this)],
@@ -651,6 +686,8 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'isAnkiConnected'>} */
     async _onApiIsAnkiConnected() {
+        // Whether AnkiMobile is installed is only known when it is opened
+        if (this._ankiConnection === 'ankimobile') { return this._ankiEnabled; }
         return await this._anki.isConnected();
     }
 
@@ -662,6 +699,161 @@ export class Backend {
     /** @type {import('api').ApiHandler<'updateAnkiNote'>} */
     async _onApiUpdateAnkiNote({noteWithId}) {
         return await this._anki.updateNoteFields(noteWithId);
+    }
+
+    /** @type {import('api').ApiHandler<'addAnkiMobileNote'>} */
+    async _onApiAddAnkiMobileNote({note}, sender) {
+        if (!this._ankiEnabled) { throw new Error('Anki is not enabled'); }
+        const tab = sender.tab;
+        if (typeof tab === 'undefined' || typeof tab.id !== 'number') { throw new Error('AnkiMobile can only be opened from a tab'); }
+
+        // AnkiMobile opens the page again with a new fragment, which brings Safari back to the same tab without
+        // reloading it, and the page's content script reports it (ankiMobileNoteAdded). It cannot open
+        // extension pages, so it stays open after adding a note from them.
+        /** @type {?string} */
+        let token = null;
+        /** @type {?string} */
+        let successUrl = null;
+        if (typeof tab.url === 'string' && /^https?:/.test(tab.url)) {
+            token = generateId(16);
+            const url = new URL(tab.url);
+            url.hash = `${ANKI_MOBILE_ADDED_HASH_PREFIX}${token}`;
+            successUrl = url.href;
+        }
+
+        const ankiMobileUrl = this._ankiMobile.getAddNoteUrl(note, this._ankiAllowDuplicates, successUrl);
+        if (token !== null) {
+            const pendingToken = token;
+            /** @type {import('core').DeferredPromiseDetails<boolean>} */
+            const details = deferPromise();
+            this._ankiMobileNotes.set(token, details);
+            const timer = setTimeout(() => details.resolve(false), ANKI_MOBILE_NOTE_TIMEOUT);
+            void details.promise.then(async (added) => {
+                clearTimeout(timer);
+                this._ankiMobileNotes.delete(pendingToken);
+                if (added) {
+                    // It is a duplicate from then on, though the copy of the collection only has it after a sync
+                    await this._getAnkiCollectionCopy().addPendingNote(note);
+                }
+            }).catch((e) => log.error(e));
+        }
+        await this._openUrlInTab(tab.id, ankiMobileUrl);
+        return token;
+    }
+
+    /** @type {import('api').ApiHandler<'waitForAnkiMobileNote'>} */
+    async _onApiWaitForAnkiMobileNote({token}) {
+        const details = this._ankiMobileNotes.get(token);
+        return typeof details !== 'undefined' ? await details.promise : false;
+    }
+
+    /** @type {import('api').ApiHandler<'ankiMobileNoteAdded'>} */
+    _onApiAnkiMobileNoteAdded({token}) {
+        this._ankiMobileNotes.get(token)?.resolve(true);
+    }
+
+    /** @type {import('api').ApiHandler<'getAnkiMobileInfo'>} */
+    async _onApiGetAnkiMobileInfo() {
+        // The copy of the collection has them too, without asking AnkiMobile
+        const collectionInfo = await this._getAnkiCollectionCopy().getCollectionInfo();
+        if (collectionInfo !== null) {
+            return {...collectionInfo, source: 'sync-server'};
+        }
+        const {info} = await sendAppExtensionMessage({action: 'getAnkiMobileInfo'}, 'Cannot read the decks and note types from AnkiMobile');
+        return typeof info === 'string' ? this._normalizeAnkiMobileInfo(parseJson(info)) : null;
+    }
+
+    /** @type {import('api').ApiHandler<'requestAnkiMobileInfo'>} */
+    async _onApiRequestAnkiMobileInfo(_params, sender) {
+        const tabId = sender.tab?.id;
+        if (typeof tabId !== 'number') { throw new Error('AnkiMobile can only be opened from a tab'); }
+        // AnkiMobile can only give them to an app, which keeps them for this extension (SceneDelegate.swift)
+        const {callbackUrl} = await sendAppExtensionMessage({action: 'getAnkiMobileInfoCallbackUrl'}, 'Cannot ask AnkiMobile for its decks and note types');
+        if (typeof callbackUrl !== 'string') { throw new Error('Cannot ask AnkiMobile for its decks and note types'); }
+        await this._openUrlInTab(tabId, this._ankiMobile.getInfoForAddingUrl(callbackUrl));
+    }
+
+    /**
+     * @param {unknown} value AnkiMobile's description of the collection, which it gives to `infoForAdding` links.
+     * @returns {import('api').AnkiMobileInfo}
+     * @throws {Error}
+     */
+    _normalizeAnkiMobileInfo(value) {
+        const error = new Error('AnkiMobile gave decks and note types that cannot be read');
+        if (!isObjectNotArray(value) || !Array.isArray(value.decks) || !Array.isArray(value.notetypes)) { throw error; }
+        /** @type {string[]} */
+        const deckNames = [];
+        for (const deck of value.decks) {
+            if (!isObjectNotArray(deck) || typeof deck.name !== 'string') { throw error; }
+            deckNames.push(deck.name);
+        }
+        /** @type {import('api').AnkiMobileModel[]} */
+        const models = [];
+        for (const model of value.notetypes) {
+            if (!isObjectNotArray(model) || typeof model.name !== 'string' || !Array.isArray(model.fields)) { throw error; }
+            /** @type {string[]} */
+            const fieldNames = [];
+            for (const field of model.fields) {
+                if (!isObjectNotArray(field) || typeof field.name !== 'string') { throw error; }
+                fieldNames.push(field.name);
+            }
+            models.push({name: model.name, fieldNames});
+        }
+        return {deckNames, models, source: 'ankimobile'};
+    }
+
+    /**
+     * @returns {AnkiCollectionCopy}
+     */
+    _getAnkiCollectionCopy() {
+        if (this._ankiCollectionCopy === null) {
+            this._ankiCollectionCopy = new AnkiCollectionCopy(getAnkiPlatformName(this._environment.getInfo().platform.os));
+        }
+        return this._ankiCollectionCopy;
+    }
+
+    /**
+     * AnkiMobile cannot tell which notes it has, so they are looked for in the copy of the collection from the
+     * sync server, if the user logged in to it. The copy is updated after a while, while it is used.
+     * @param {import('anki').Note[]} notes
+     * @returns {Promise<import('anki').NoteInfoWrapper[]>}
+     */
+    async _getAnkiMobileNoteInfo(notes) {
+        const copy = this._getAnkiCollectionCopy();
+        copy.update({minInterval: ANKI_COLLECTION_COPY_CHECK_INTERVAL, ifAvailable: true}).catch((e) => log.error(e));
+        /** @type {?(?import('anki').NoteId[])[]} */
+        let duplicates = null;
+        try {
+            duplicates = await copy.findDuplicates(notes);
+        } catch (e) {
+            log.error(e);
+        }
+        return notes.map((note, i) => {
+            const valid = isNoteDataValid(note);
+            let noteIds = duplicates !== null ? duplicates[i] : null;
+            // A note added since the copy was updated is a duplicate whose id is not known
+            if (noteIds !== null && noteIds.length === 0) { noteIds = [INVALID_NOTE_ID]; }
+            return {canAdd: valid, valid, noteIds};
+        });
+    }
+
+    /**
+     * Opens a link to an app, which Safari asks the user to allow first. The tab stays on its page.
+     * @param {number} tabId
+     * @param {string} url
+     * @returns {Promise<void>}
+     */
+    _openUrlInTab(tabId, url) {
+        return new Promise((resolve, reject) => {
+            chrome.tabs.update(tabId, {url}, () => {
+                const e = chrome.runtime.lastError;
+                if (e) {
+                    reject(new Error(e.message));
+                } else {
+                    resolve();
+                }
+            });
+        });
     }
 
     /**
@@ -740,6 +932,9 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'getAnkiNoteInfo'>} */
     async _onApiGetAnkiNoteInfo({notes, fetchAdditionalInfo}) {
+        if (this._ankiConnection === 'ankimobile') {
+            return await this._getAnkiMobileNoteInfo(notes);
+        }
         const canAddArray = await this.partitionAddibleNotes(notes);
 
         /** @type {import('anki').NoteInfoWrapper[]} */
@@ -813,7 +1008,7 @@ export class Backend {
     /** @type {import('api').ApiHandler<'injectAnkiNoteMedia'>} */
     async _onApiInjectAnkiNoteMedia({timestamp, definitionDetails, audioDetails, screenshotDetails, clipboardDetails, dictionaryMediaDetails}) {
         return await this._injectAnkNoteMedia(
-            this._anki,
+            this._ankiConnection === 'ankimobile' ? this._ankiMobile : this._anki,
             timestamp,
             definitionDetails,
             audioDetails,
@@ -824,7 +1019,13 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'viewNotes'>} */
-    async _onApiViewNotes({noteIds, mode, allowFallback}) {
+    async _onApiViewNotes({noteIds, mode, allowFallback}, sender) {
+        if (this._ankiConnection === 'ankimobile') {
+            const tabId = sender.tab?.id;
+            if (typeof tabId !== 'number') { throw new Error('AnkiMobile can only be opened from a tab'); }
+            await this._openUrlInTab(tabId, this._ankiMobile.getBrowseNotesUrl(noteIds));
+            return 'browse';
+        }
         if (noteIds.length === 1 && mode === 'edit') {
             try {
                 await this._anki.guiEditNote(noteIds[0]);
@@ -1614,8 +1815,11 @@ export class Backend {
         /** @type {?string} */
         let apiKey = options.anki.apiKey;
         if (apiKey === '') { apiKey = null; }
+        this._ankiConnection = options.anki.connection;
+        this._ankiEnabled = options.anki.enable;
+        this._ankiAllowDuplicates = options.anki.duplicateBehavior !== 'prevent';
         this._anki.server = options.anki.server;
-        this._anki.enabled = options.anki.enable;
+        this._anki.enabled = options.anki.enable && options.anki.connection === 'ankiconnect';
         this._anki.apiKey = apiKey;
 
         this._mecab.setEnabled(options.parsing.enableMecabParser && enabled);
@@ -2511,7 +2715,7 @@ export class Backend {
     }
 
     /**
-     * @param {AnkiConnect} ankiConnect
+     * @param {AnkiConnect|AnkiMobile} ankiConnect
      * @param {number} timestamp
      * @param {import('api').InjectAnkiNoteMediaDefinitionDetails} definitionDetails
      * @param {?import('api').InjectAnkiNoteMediaAudioDetails} audioDetails
@@ -2583,7 +2787,7 @@ export class Backend {
     }
 
     /**
-     * @param {AnkiConnect} ankiConnect
+     * @param {AnkiConnect|AnkiMobile} ankiConnect
      * @param {number} timestamp
      * @param {import('api').InjectAnkiNoteMediaDefinitionDetails} definitionDetails
      * @param {import('api').InjectAnkiNoteMediaAudioDetails} details
@@ -2623,7 +2827,7 @@ export class Backend {
     }
 
     /**
-     * @param {AnkiConnect} ankiConnect
+     * @param {AnkiConnect|AnkiMobile} ankiConnect
      * @param {number} timestamp
      * @param {import('api').InjectAnkiNoteMediaScreenshotDetails} details
      * @returns {Promise<?string>}
@@ -2643,7 +2847,7 @@ export class Backend {
     }
 
     /**
-     * @param {AnkiConnect} ankiConnect
+     * @param {AnkiConnect|AnkiMobile} ankiConnect
      * @param {number} timestamp
      * @returns {Promise<?string>}
      */
@@ -2674,7 +2878,7 @@ export class Backend {
     }
 
     /**
-     * @param {AnkiConnect} ankiConnect
+     * @param {AnkiConnect|AnkiMobile} ankiConnect
      * @param {number} timestamp
      * @param {import('api').InjectAnkiNoteMediaDictionaryMediaDetails[]} dictionaryMediaDetails
      * @returns {Promise<{results: import('api').InjectAnkiNoteDictionaryMediaResult[], errors: unknown[]}>}

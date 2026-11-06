@@ -591,6 +591,7 @@ export class OptionsUtil {
             this._updateVersion77,
             this._updateVersion78,
             this._updateVersion79,
+            this._updateVersion80,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1883,6 +1884,18 @@ export class OptionsUtil {
             for (const source of profile.options.audio.sources) {
                 source.apiKey = '';
             }
+        }
+    }
+
+    /**
+     *  - Added anki.connection, which can be AnkiMobile on iOS.
+     *  - Added anki.syncServer, where the copy of the collection for AnkiMobile is read from.
+     *  @type {import('options-util').UpdateFunction}
+     */
+    async _updateVersion80(options) {
+        for (const profile of options.profiles) {
+            profile.options.anki.connection = 'ankiconnect';
+            profile.options.anki.syncServer = '';
         }
     }
 

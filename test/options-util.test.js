@@ -513,6 +513,8 @@ function createProfileOptionsUpdatedTestData1() {
         },
         anki: {
             enable: false,
+            connection: 'ankiconnect',
+            syncServer: '',
             server: 'http://127.0.0.1:8765',
             tags: ['yomitan'],
             screenshot: {format: 'png', quality: 92},
@@ -710,7 +712,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 79,
+        version: 80,
         global: {
             dataTransmissionConsentShown: false,
         },
