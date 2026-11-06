@@ -471,6 +471,15 @@ export class Backend {
 
     /** @type {import('extension').ChromeRuntimeOnMessageCallback<import('api').ApiMessageAny>} */
     _onMessageWrapper(message, sender, sendResponse) {
+        const message2 = /** @type {unknown} */ (message);
+        if (typeof message2 === 'string') {
+            // Safari, where WebExtension.sendMessage sends JSON to keep the order of the keys
+            return this._onMessageWrapper(
+                parseJson(message2),
+                sender,
+                (response) => { sendResponse(typeof response === 'undefined' ? response : JSON.stringify(response)); },
+            );
+        }
         if (this._isPrepared) {
             return this._onMessage(message, sender, sendResponse);
         }

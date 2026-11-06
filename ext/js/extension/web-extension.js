@@ -16,6 +16,7 @@
  */
 
 import {EventDispatcher} from '../core/event-dispatcher.js';
+import {parseJson} from '../core/json.js';
 import {toError} from '../core/to-error.js';
 import {isSafariExtension} from './app-extension.js';
 
@@ -73,7 +74,15 @@ export class WebExtension extends EventDispatcher {
      */
     sendMessage(message, responseCallback) {
         try {
-            chrome.runtime.sendMessage(message, responseCallback);
+            if (isSafariExtension()) {
+                // Safari reorders the keys of objects in messages, and the order of some matters, such as a note's fields.
+                // JSON keeps it, and the backend answers a message sent as JSON with JSON (Backend._onMessageWrapper).
+                chrome.runtime.sendMessage(JSON.stringify(message), (/** @type {unknown} */ response) => {
+                    responseCallback(typeof response === 'string' ? parseJson(response) : response);
+                });
+            } else {
+                chrome.runtime.sendMessage(message, responseCallback);
+            }
         } catch (error) {
             this.triggerUnloaded();
             throw toError(error);
