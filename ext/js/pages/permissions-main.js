@@ -24,7 +24,6 @@ import {ExtensionContentController} from './common/extension-content-controller.
 import {ModalController} from './settings/modal-controller.js';
 import {PermissionsOriginController} from './settings/permissions-origin-controller.js';
 import {PermissionsToggleController} from './settings/permissions-toggle-controller.js';
-import {PersistentStorageController} from './settings/persistent-storage-controller.js';
 import {SettingsController} from './settings/settings-controller.js';
 import {SettingsDisplayController} from './settings/settings-display-controller.js';
 
@@ -129,9 +128,6 @@ await Application.main(true, async (application) => {
 
     const permissionsOriginController = new PermissionsOriginController(settingsController);
     void permissionsOriginController.prepare();
-
-    const persistentStorageController = new PersistentStorageController(application);
-    void persistentStorageController.prepare();
 
     await promiseTimeout(100);
 

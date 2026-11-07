@@ -37,7 +37,6 @@ import {MecabController} from './mecab-controller.js';
 import {ModalController} from './modal-controller.js';
 import {NestedPopupsController} from './nested-popups-controller.js';
 import {PermissionsToggleController} from './permissions-toggle-controller.js';
-import {PersistentStorageController} from './persistent-storage-controller.js';
 import {PopupPreviewController} from './popup-preview-controller.js';
 import {PopupWindowController} from './popup-window-controller.js';
 import {ProfileController} from './profile-controller.js';
@@ -102,10 +101,7 @@ await Application.main(true, async (application) => {
     const popupPreviewController = new PopupPreviewController(settingsController);
     popupPreviewController.prepare();
 
-    const persistentStorageController = new PersistentStorageController(application);
-    preparePromises.push(persistentStorageController.prepare());
-
-    const storageController = new StorageController(persistentStorageController);
+    const storageController = new StorageController(application);
     storageController.prepare();
 
     const dictionaryController = new DictionaryController(settingsController, modalController, statusFooter);

@@ -20,11 +20,11 @@ import {querySelectorNotNull} from '../../dom/query-selector.js';
 
 export class StorageController {
     /**
-     * @param {import('./persistent-storage-controller.js').PersistentStorageController} persistentStorageController
+     * @param {import('../../application.js').Application} application
      */
-    constructor(persistentStorageController) {
-    /** @type {import('./persistent-storage-controller.js').PersistentStorageController} */
-        this._persistentStorageController = persistentStorageController;
+    constructor(application) {
+        /** @type {import('../../application.js').Application} */
+        this._application = application;
         /** @type {?StorageEstimate} */
         this._mostRecentStorageEstimate = null;
         /** @type {boolean} */
@@ -60,7 +60,7 @@ export class StorageController {
         const storageRefreshButton = querySelectorNotNull(document, '#storage-refresh');
 
         storageRefreshButton.addEventListener('click', this._onStorageRefreshButtonClick.bind(this), false);
-        this._persistentStorageController.application.on('storageChanged', this._onStorageChanged.bind(this));
+        this._application.on('storageChanged', this._onStorageChanged.bind(this));
 
         void this._updateStats();
     }
@@ -89,7 +89,7 @@ export class StorageController {
             let storageIsLow = false;
 
             // Firefox reports usage as 0 when persistent storage is enabled.
-            const finite = valid && ((typeof estimate.usage === 'number' && estimate.usage > 0) || !(await this._persistentStorageController.isStoragePeristent()));
+            const finite = valid && ((typeof estimate.usage === 'number' && estimate.usage > 0) || !(await this._isStoragePersistent()));
             if (finite) {
                 let {usage, quota} = estimate;
 
@@ -120,6 +120,18 @@ export class StorageController {
     }
 
     // Private
+
+    /**
+     * @returns {Promise<boolean>}
+     */
+    async _isStoragePersistent() {
+        try {
+            return await navigator.storage.persisted();
+        } catch (e) {
+            // NOP
+        }
+        return false;
+    }
 
     /**
      * @returns {Promise<?StorageEstimate>}

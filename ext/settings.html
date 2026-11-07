@@ -387,45 +387,6 @@
                 </div>
             </div>
         </div>
-        <div class="settings-item advanced-only">
-            <div class="settings-item-inner">
-                <div class="settings-item-left">
-                    <div class="settings-item-label">Persistent storage</div>
-                    <div class="settings-item-description">
-                        Enable to help prevent the browser from unexpectedly clearing the database.
-                        <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
-                    </div>
-                </div>
-                <div class="settings-item-right">
-                    <label class="toggle"><input type="checkbox" id="storage-persistent-checkbox"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
-                </div>
-            </div>
-            <div class="settings-item-children more" hidden>
-                <p>
-                    Web browsers will sometimes clear stored data if the device is running low on storage space.
-                    This can result in the imported dictionaries being deleted unexpectedly, causing Yomitan to stop functioning.
-                    Enabling persistent storage tells the browser that the data should not be deleted in those circumstances.
-                </p>
-                <p data-show-for-browser="firefox firefox-mobile" class="storage-use-invalid" hidden>
-                    On Firefox and Firefox for Android, the storage information feature may be hidden behind a browser flag.
-
-                    To enable this flag, open <a href="about:config" target="_blank" rel="noopener">about:config</a> and search for
-                    <strong>dom.storageManager.enabled</strong>.
-
-                    Setting its value to <strong>true</strong> should allow storage information to be calculated.
-                </p>
-                <p data-show-for-browser="firefox-mobile">
-                    It may not be possible to enable Persistent Storage on Firefox for Android.
-                </p>
-                <p data-show-for-browser="chrome edge">
-                    Chromium-based browsers should not need to enable this setting since the Yomitan extension has
-                    the <code>unlimitedStorage</code> permission, which should prevent data deletion.<sup><a href="https://bugs.chromium.org/p/chromium/issues/detail?id=680392#c15" target="_blank" rel="noopener">[1]</a></sup>
-                </p>
-                <p>
-                    <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
-                </p>
-            </div>
-        </div>
     </div>
 
     <!-- Scanning -->
