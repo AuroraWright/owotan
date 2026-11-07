@@ -17,6 +17,7 @@
  */
 
 import {Application} from '../application.js';
+import {log} from '../core/log.js';
 import {HotkeyHandler} from '../input/hotkey-handler.js';
 import {Frontend} from './frontend.js';
 import {PopupFactory} from './popup-factory.js';
@@ -45,4 +46,15 @@ await Application.main(false, async (application) => {
         browser: browser,
     });
     await frontend.prepare();
+
+    if (browser === 'safari' && window === window.parent) {
+        // See Backend._onApiPageVisibilityChanged
+        const onVisibilityChange = () => {
+            application.api.pageVisibilityChanged(document.visibilityState === 'visible', Date.now()).catch((error) => {
+                if (!application.webExtension.unloaded) { log.error(error); }
+            });
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange, false);
+        if (document.visibilityState === 'visible') { onVisibilityChange(); }
+    }
 });

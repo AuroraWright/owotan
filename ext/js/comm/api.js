@@ -523,6 +523,15 @@ export class API {
         return this._invoke('stopNativeAudio', {id});
     }
 
+    /**
+     * @param {import('api').ApiParam<'pageVisibilityChanged', 'visible'>} visible
+     * @param {import('api').ApiParam<'pageVisibilityChanged', 'time'>} time
+     * @returns {Promise<import('api').ApiReturn<'pageVisibilityChanged'>>}
+     */
+    pageVisibilityChanged(visible, time) {
+        return this._invoke('pageVisibilityChanged', {visible, time});
+    }
+
     // Utilities
 
     /**

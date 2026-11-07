@@ -63,6 +63,12 @@ const ANKI_MOBILE_NOTE_TIMEOUT = 5 * 60 * 1000;
 const ANKI_COLLECTION_COPY_CHECK_INTERVAL = 5 * 60 * 1000;
 
 /**
+ * How long all pages must have been hidden for Safari on iOS to have been suspended, in milliseconds. It suspends
+ * Safari about 25 seconds after the device locks or another app opens.
+ */
+const SAFARI_SUSPENDED_HIDDEN_DURATION = 10 * 1000;
+
+/**
  * This class controls the core logic of the extension, including API calls
  * and various forms of communication between browser tabs and external applications.
  */
@@ -176,6 +182,10 @@ export class Backend {
         this._tabMessagePortCallbacks = new Map();
         /** @type {number} */
         this._tabMessagePortNextId = 0;
+        /** @type {Set<number>} The tabs whose web page is visible. */
+        this._visiblePageTabIds = new Set();
+        /** @type {number} When a web page was last hidden, or 0. */
+        this._pageHiddenTime = 0;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -236,6 +246,7 @@ export class Backend {
             ['downloadAudio',                this._onApiDownloadAudio.bind(this)],
             ['playNativeAudio',              this._onApiPlayNativeAudio.bind(this)],
             ['stopNativeAudio',              this._onApiStopNativeAudio.bind(this)],
+            ['pageVisibilityChanged',        this._onApiPageVisibilityChanged.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1440,6 +1451,30 @@ export class Backend {
     /** @type {import('api').ApiHandler<'stopNativeAudio'>} */
     async _onApiStopNativeAudio({id}) {
         await sendAppExtensionMessage({action: 'stopAudio', id}, 'Cannot stop audio');
+    }
+
+    /**
+     * When Safari on iOS is suspended, as when the device locks, the process of the background page loses its
+     * foreground priority, and it is only given one again when the background page loads. Lookups then take tens
+     * of seconds. So when a web page shows after all of them were hidden for long enough that Safari was suspended,
+     * the extension reloads, which loads the background page again. The content scripts keep working.
+     * @type {import('api').ApiHandler<'pageVisibilityChanged'>}
+     */
+    _onApiPageVisibilityChanged({visible, time}, sender) {
+        const tabId = sender.tab?.id;
+        if (typeof tabId !== 'number' || this._environment.getInfo().platform.os !== 'ios') { return; }
+        if (!visible) {
+            this._visiblePageTabIds.delete(tabId);
+            this._pageHiddenTime = Math.max(this._pageHiddenTime, time);
+            return;
+        }
+        this._visiblePageTabIds.delete(tabId);
+        const otherPageVisible = this._visiblePageTabIds.size > 0;
+        this._visiblePageTabIds.add(tabId);
+        if (otherPageVisible || this._pageHiddenTime === 0 || time - this._pageHiddenTime < SAFARI_SUSPENDED_HIDDEN_DURATION) { return; }
+        log.log('Reloading after Safari was suspended');
+        // After the page gets its response
+        setTimeout(() => { chrome.runtime.reload(); }, 0);
     }
 
     // Command handlers

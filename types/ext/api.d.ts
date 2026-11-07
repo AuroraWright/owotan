@@ -490,6 +490,14 @@ type ApiSurface = {
         };
         return: void;
     };
+    pageVisibilityChanged: {
+        params: {
+            visible: boolean;
+            /** When the visibility changed, from `Date.now()`. */
+            time: number;
+        };
+        return: void;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];
