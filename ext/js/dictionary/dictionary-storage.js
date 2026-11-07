@@ -31,8 +31,7 @@ const RECORD_FILE_NAME = 'yomitan.json';
 const IMPORT_FILE_NAMES = ['blobs.bin', 'hash.table', 'bloom.filter', 'scan.idx', 'dict.zstd', 'media.bin', 'media.idx', 'index.json', '.hoshidicts_7'];
 /**
  * The files hoshidicts reads only parts of as it looks things up. The others it reads whole when a dictionary is
- * added. The hash table is read whole too, but it is too large to also hold a copy of until all the dictionaries
- * have been added.
+ * added.
  */
 const ON_DEMAND_FILE_NAMES = new Set(['blobs.bin', 'media.bin', 'hash.table']);
 
@@ -231,19 +230,22 @@ export class BlobDictionaryStorage {
         } catch (e) {
             // They are read as they are needed.
         }
-        /** @type {BlobReadHandle[]} */
-        const handles = [];
+        const fileLists = entries.map((entry) => entry?.files.map(({name, blob}) => ({name, handle: new BlobReadHandle(blob, contents.get(blob) ?? null)})) ?? null);
+        for (const files of fileLists) {
+            // hoshidicts reads the header of each hash table as it adds the dictionary, so they are read together.
+            files?.find(({name}) => name === 'hash.table')?.handle.advise(0, 4);
+        }
         return {
             mounts: dictionaries.map(({id, path}, i) => () => {
-                const entry = entries[i];
-                if (entry === null) { throw new Error(`No dictionary ${id}`); }
-                const files = entry.files.map(({name, blob}) => ({name, handle: new BlobReadHandle(blob, contents.get(blob) ?? null)}));
-                handles.push(...files.map(({handle}) => handle));
+                const files = fileLists[i];
+                if (files === null) { throw new Error(`No dictionary ${id}`); }
                 mountFiles(hoshidicts, path, {files});
             }),
             release: () => {
                 contents.clear();
-                for (const handle of handles) { handle.release(); }
+                for (const files of fileLists) {
+                    for (const {handle} of files ?? []) { handle.release(); }
+                }
             },
         };
     }

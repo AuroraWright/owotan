@@ -41,13 +41,14 @@ index c61d2f7..7583ba5 100644
  
  namespace dictionary_importer {
 diff --git a/include/hoshidicts/query.hpp b/include/hoshidicts/query.hpp
-index dba519f..6dbf478 100644
+index dba519f..0f8cae9 100644
 --- a/include/hoshidicts/query.hpp
 +++ b/include/hoshidicts/query.hpp
-@@ -1,11 +1,13 @@
+@@ -1,11 +1,14 @@
  #pragma once
  
  #include <cstdint>
++#include <initializer_list>
 +#include <map>
  #include <memory>
  #include <optional>
@@ -58,7 +59,7 @@ index dba519f..6dbf478 100644
  #include <unordered_map>
  #include <vector>
  
-@@ -94,6 +96,49 @@ struct KanjiResult {
+@@ -94,6 +97,49 @@ struct KanjiResult {
    std::vector<FrequencyEntry> frequencies;
  };
  
@@ -108,7 +109,7 @@ index dba519f..6dbf478 100644
  struct RawTerm;
  struct RawTerms;
  struct BlobPins;
-@@ -190,6 +235,22 @@ class DictionaryQuery {
+@@ -190,6 +236,26 @@ class DictionaryQuery {
    KanjiResult query_kanji(const std::string& kanji, std::span<const std::string> dictionaries) const;
  
    std::vector<TermResult> query(const std::string& expression) const;
@@ -116,12 +117,16 @@ index dba519f..6dbf478 100644
 +  // row has, whose expression or reading is `key`.
 +  std::vector<TermRow> query_rows(const std::string& key) const;
 +  std::optional<std::string> query_glossary(const std::string& dict_name, uint64_t offset) const;
-+  // Tells the paged files of the dictionaries what query_rows of each of
-+  // `keys` will read, and the same for query_glossary of each item, a level
-+  // of records at a time, as each level is found in the one before it. A file
-+  // system that reads in batches can then read each level at once, rather than
-+  // record by record.
++  // Tell the paged files of the dictionaries what query_rows,
++  // query_meta_rows, query_kanji_rows and query_kanji_meta_rows of each of
++  // `keys` will read, and query_glossary of each item, a level of records at
++  // a time, as each level is found in the one before it: the hash table slots,
++  // the index records, then the records. A file system that reads in batches
++  // can then read each level at once, rather than record by record.
 +  void prefetch_rows(std::span<const std::string> keys) const;
++  void prefetch_meta_rows(std::span<const std::string> keys) const;
++  void prefetch_kanji_rows(std::span<const std::string> characters) const;
++  void prefetch_kanji_meta_rows(std::span<const std::string> characters) const;
 +  void prefetch_glossaries(std::span<const std::tuple<std::string, uint64_t>> items) const;
 +  // The rows a sequenced term dictionary of version 7 or later files under `sequence`.
 +  std::vector<TermRow> query_sequence_rows(const std::string& dict_name, int64_t sequence) const;
@@ -131,6 +136,17 @@ index dba519f..6dbf478 100644
  
    std::vector<char> get_media_file(const std::string& dict_name, const std::string& media_path) const;
    // A view into the mapped media.bin; empty when the file is missing and when
+@@ -221,6 +287,10 @@ class DictionaryQuery {
+   struct DictionaryData;
+   struct Dictionary;
+ 
++  // What prefetch_rows and the like advise, for the dictionaries of `lists`.
++  void prefetch_records(std::initializer_list<const std::vector<Dictionary>*> lists,
++                        std::span<const std::string> keys) const;
++
+   // The dictionaries a request uses (docs/languages.md, section 9.7): every
+   // loaded one in load order, or exactly those a request's list names, in
+   // its order. `term_path` (lookup_dictionary) further restricts term
 diff --git a/src/blob_file.cpp b/src/blob_file.cpp
 index d72fbba..253ac28 100644
 --- a/src/blob_file.cpp
@@ -187,6 +203,45 @@ index f9df53f..771f668 100644
    // Scalar index probes copy their slot and release each page immediately;
    // they need neither the query's pins nor a spill allocation at a boundary.
    void copy(uint64_t offset, size_t length, void* out) const;
+diff --git a/src/hash/hash.cpp b/src/hash/hash.cpp
+index ede968b..e4be130 100644
+--- a/src/hash/hash.cpp
++++ b/src/hash/hash.cpp
+@@ -41,6 +41,20 @@ uint64_t linear::operator()(std::string_view key) const {
+   throw std::runtime_error("hash.table has no empty slot in its probe chain");
+ }
+ 
++void linear::advise(std::string_view key) const {
++  if (!file_.paged() || ptr_->capacity == 0) {
++    return;
++  }
++  uint64_t h = XXH3_64bits(key.data(), key.size());
++  if (!bloom_->contains(h)) {
++    return;
++  }
++  // The slot and the few after it that most probe chains end within.
++  constexpr size_t advised_slots = 4;
++  const uint64_t pos = h % ptr_->capacity;
++  file_.advise(sizeof(uint32_t) + pos * sizeof(slot), advised_slots * sizeof(slot));
++}
++
+ void linear::build_to_file(const std::vector<std::pair<uint64_t, uint64_t>>& hash_entries,
+                            const std::filesystem::path& path) {
+   ptr_->capacity = std::max<uint64_t>(hash_entries.size() * 10 / 7, 16);
+diff --git a/src/hash/hash.hpp b/src/hash/hash.hpp
+index 65c40e1..1e6289a 100644
+--- a/src/hash/hash.hpp
++++ b/src/hash/hash.hpp
+@@ -13,6 +13,9 @@ class linear {
+   linear();
+   ~linear();
+   uint64_t operator()(std::string_view key) const;
++  // Tells a paged table that looking up `key` will read its slot soon
++  // (BlobFile::advise).
++  void advise(std::string_view key) const;
+ 
+   void build_to_file(const std::vector<std::pair<uint64_t, uint64_t>>& hash_entries, const std::filesystem::path& path);
+   bool load(BlobFile file);
 diff --git a/src/image_size.cpp b/src/image_size.cpp
 new file mode 100644
 index 0000000..5c255c6
@@ -1094,10 +1149,15 @@ index 1debfb3..c524591 100644
    void forget(uint64_t file_id);
  
 diff --git a/src/query.cpp b/src/query.cpp
-index 6df3c68..4d123f6 100644
+index 6df3c68..03a80b3 100644
 --- a/src/query.cpp
 +++ b/src/query.cpp
-@@ -15,6 +15,7 @@
+@@ -11,10 +11,12 @@
+ #include <cstring>
+ #include <filesystem>
+ #include <fstream>
++#include <initializer_list>
+ #include <memory>
  #include <ranges>
  #include <stdexcept>
  #include <string_view>
@@ -1105,7 +1165,7 @@ index 6df3c68..4d123f6 100644
  #include <vector>
  
  #include "blob_file.hpp"
-@@ -318,7 +319,9 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
+@@ -318,7 +320,9 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
    // same pair with the score stored as a double, which is what the Yomitan
    // schema's JSON number can hold (fractions, and magnitudes beyond int32).
    int version = 0;
@@ -1116,7 +1176,7 @@ index 6df3c68..4d123f6 100644
      version = 6;
    } else if (std::filesystem::is_regular_file(path / ".hoshidicts_5")) {
      version = 5;
-@@ -393,7 +396,8 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
+@@ -393,7 +397,8 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
      dict.data->media_index = memory::map_rd(path / "media.idx");
    }
  
@@ -1126,7 +1186,7 @@ index 6df3c68..4d123f6 100644
      std::ifstream f(path / "dict.zstd", std::ios::binary);
      const std::string blob(std::istreambuf_iterator<char>(f), {});
      dict.data->zstd_dict =
-@@ -614,6 +618,9 @@ RawTerms DictionaryQuery::query_raw(const std::string& expression, BlobPins& pin
+@@ -614,6 +619,9 @@ RawTerms DictionaryQuery::query_raw(const std::string& expression, BlobPins& pin
              }
            }
          }
@@ -1136,7 +1196,7 @@ index 6df3c68..4d123f6 100644
  
          double score = 0;
          if (data->version >= 5) {
-@@ -1196,3 +1203,317 @@ bool DictionaryQuery::hash_index_paged(const std::string& path) const {
+@@ -1196,3 +1204,345 @@ bool DictionaryQuery::hash_index_paged(const std::string& path) const {
    const auto* dict = find_loaded(path);
    return dict && dict->data->table.paged();
  }
@@ -1271,18 +1331,30 @@ index 6df3c68..4d123f6 100644
 +constexpr size_t term_record_advice_bytes = 512;
 +}  // namespace
 +
-+void DictionaryQuery::prefetch_rows(std::span<const std::string> keys) const {
++void DictionaryQuery::prefetch_records(std::initializer_list<const std::vector<Dictionary>*> lists,
++                                       std::span<const std::string> keys) const {
++  // A dictionary loaded as several kinds shares its data.
++  std::vector<const DictionaryData*> dicts;
++  for (const auto* list : lists) {
++    for (const auto& dict : *list) {
++      const auto* data = dict.data.get();
++      if (data->version >= 7 && data->blobs.paged() && std::ranges::find(dicts, data) == dicts.end()) {
++        dicts.push_back(data);
++      }
++    }
++  }
 +  // Only a hint, so a file that cannot be read is left to the query.
 +  try {
++    for (const auto& key : keys) {
++      for (const auto* data : dicts) {
++        data->table.advise(key);
++      }
++    }
 +    // The index record of each key in each dictionary: a count, then the
-+    // offsets of the term records.
++    // offsets of the records.
 +    std::vector<std::pair<const DictionaryData*, uint64_t>> indexes;
 +    for (const auto& key : keys) {
-+      for (const auto& dict : term_dicts_) {
-+        const auto* data = dict.data.get();
-+        if (data->version < 7 || !data->blobs.paged()) {
-+          continue;
-+        }
++      for (const auto* data : dicts) {
 +        const uint64_t offset = data->table(key);
 +        if (offset != 0) {
 +          data->blobs.advise(offset, sizeof(uint32_t));
@@ -1308,6 +1380,22 @@ index 6df3c68..4d123f6 100644
 +    }
 +  } catch (const std::exception&) {
 +  }
++}
++
++void DictionaryQuery::prefetch_rows(std::span<const std::string> keys) const {
++  prefetch_records({&term_dicts_}, keys);
++}
++
++void DictionaryQuery::prefetch_meta_rows(std::span<const std::string> keys) const {
++  prefetch_records({&freq_dicts_, &pitch_dicts_}, keys);
++}
++
++void DictionaryQuery::prefetch_kanji_rows(std::span<const std::string> characters) const {
++  prefetch_records({&kanji_dicts_}, characters);
++}
++
++void DictionaryQuery::prefetch_kanji_meta_rows(std::span<const std::string> characters) const {
++  prefetch_records({&freq_dicts_}, characters);
 +}
 +
 +void DictionaryQuery::prefetch_glossaries(std::span<const std::tuple<std::string, uint64_t>> items) const {

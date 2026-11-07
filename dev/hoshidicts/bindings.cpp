@@ -111,13 +111,16 @@ EMSCRIPTEN_KEEPALIVE const char* yh_import(const char* archive_path, const char*
   return write(report);
 }
 
-// Loads the dictionary at `path` for every kind of query. Its entries are read
-// from the files on demand, rather than copied into memory.
+// Loads the dictionary at `path` for every kind of query. Its entries and its
+// hash index are read from the files on demand, rather than copied into
+// memory, and the lookups say what they will read ahead (prefetch_rows and the
+// like).
 EMSCRIPTEN_KEEPALIVE int yh_add(const char* path) {
   const auto storage = DictionaryStorage::Paged;
+  const auto index_storage = DictionaryIndexStorage::Paged;
   try {
-    return g_query.add_term_dict(path, storage) && g_query.add_freq_dict(path, storage) &&
-                   g_query.add_kanji_dict(path, storage)
+    return g_query.add_term_dict(path, storage, index_storage) && g_query.add_freq_dict(path, storage, index_storage) &&
+                   g_query.add_kanji_dict(path, storage, index_storage)
                ? 1
                : 0;
   } catch (const std::exception&) {
@@ -168,17 +171,23 @@ EMSCRIPTEN_KEEPALIVE const char* yh_glossaries(const char* items_json) {
 
 // ["key", ...] -> [[MetaRow, ...], ...]
 EMSCRIPTEN_KEEPALIVE const char* yh_find_term_meta(const char* keys_json) {
-  return each_key<std::string>(keys_json, [](const std::string& key) { return g_query.query_meta_rows(key); });
+  return each_key<std::string>(
+      keys_json, [](const std::string& key) { return g_query.query_meta_rows(key); },
+      [](const std::vector<std::string>& keys) { g_query.prefetch_meta_rows(keys); });
 }
 
 // ["character", ...] -> [[KanjiRow, ...], ...]
 EMSCRIPTEN_KEEPALIVE const char* yh_find_kanji(const char* keys_json) {
-  return each_key<std::string>(keys_json, [](const std::string& key) { return g_query.query_kanji_rows(key); });
+  return each_key<std::string>(
+      keys_json, [](const std::string& key) { return g_query.query_kanji_rows(key); },
+      [](const std::vector<std::string>& keys) { g_query.prefetch_kanji_rows(keys); });
 }
 
 // ["character", ...] -> [[MetaRow, ...], ...]
 EMSCRIPTEN_KEEPALIVE const char* yh_find_kanji_meta(const char* keys_json) {
-  return each_key<std::string>(keys_json, [](const std::string& key) { return g_query.query_kanji_meta_rows(key); });
+  return each_key<std::string>(
+      keys_json, [](const std::string& key) { return g_query.query_kanji_meta_rows(key); },
+      [](const std::vector<std::string>& keys) { g_query.prefetch_kanji_meta_rows(keys); });
 }
 
 // Reads a media file of a loaded dictionary; yh_media_size is its length, -1
