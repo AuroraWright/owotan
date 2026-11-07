@@ -51,6 +51,12 @@ export class AnkiController {
         this._ankiMobileInfo = null;
         /** @type {boolean} */
         this._ankiMobileInfoRequested = false;
+        /** @type {?HTMLButtonElement} */
+        this._ankiMobileInfoButton = null;
+        /** @type {?HTMLElement} */
+        this._ankiMobileInfoDescription = null;
+        /** @type {string} */
+        this._ankiMobileInfoDescriptionText = '';
         /** @type {string} */
         this._language = 'ja';
         /** @type {SelectorObserver<AnkiCardController>} */
@@ -127,6 +133,11 @@ export class AnkiController {
         const newFormatButton = querySelectorNotNull(document, '#anki-cards-new-format button');
         /** @type {HTMLButtonElement} */
         const ankiMobileInfoButton = querySelectorNotNull(document, '#anki-mobile-info-button');
+        /** @type {HTMLElement} */
+        const ankiMobileInfoDescription = querySelectorNotNull(document, '#anki-mobile-info-description');
+        this._ankiMobileInfoButton = ankiMobileInfoButton;
+        this._ankiMobileInfoDescription = ankiMobileInfoDescription;
+        this._ankiMobileInfoDescriptionText = ankiMobileInfoDescription.textContent ?? '';
 
         this._ankiErrorMessageDetailsToggle.addEventListener('click', this._onAnkiErrorMessageDetailsToggleClick.bind(this), false);
         if (this._ankiEnableCheckbox !== null) {
@@ -342,12 +353,25 @@ export class AnkiController {
     }
 
     /**
+     * What AnkiMobile gives is not used while the sync server collection gives the decks and note types.
+     */
+    _updateAnkiMobileInfoButton() {
+        if (this._ankiMobileInfoButton === null || this._ankiMobileInfoDescription === null) { return; }
+        const fromSyncServer = this._ankiMobileInfo !== null && this._ankiMobileInfo.source === 'sync-server';
+        this._ankiMobileInfoButton.disabled = fromSyncServer;
+        this._ankiMobileInfoDescription.textContent = fromSyncServer ?
+            'They come from the sync server collection while you are logged in.' :
+            this._ankiMobileInfoDescriptionText;
+    }
+
+    /**
      * @returns {Promise<import('api').AnkiMobileInfo>}
      * @throws {Error} If AnkiMobile has not given any.
      */
     async _getAnkiMobileInfo() {
         if (this._ankiMobileInfo === null) {
             this._ankiMobileInfo = await this._settingsController.application.api.getAnkiMobileInfo();
+            this._updateAnkiMobileInfoButton();
         }
         if (this._ankiMobileInfo === null) {
             throw new Error('Load the decks and note types from AnkiMobile, or log in to copy the collection');
