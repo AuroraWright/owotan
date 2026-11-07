@@ -120,10 +120,10 @@ index dba519f..1a3759f 100644
    // A view into the mapped media.bin; empty when the file is missing and when
 diff --git a/src/image_size.cpp b/src/image_size.cpp
 new file mode 100644
-index 0000000..ea4e983
+index 0000000..5c255c6
 --- /dev/null
 +++ b/src/image_size.cpp
-@@ -0,0 +1,268 @@
+@@ -0,0 +1,314 @@
 +#include "image_size.hpp"
 +
 +#include <algorithm>
@@ -180,7 +180,45 @@ index 0000000..ea4e983
 +  return sized(le16(data, 6), le16(data, 8));
 +}
 +
++// The orientation that an Exif block's TIFF data records in its first image
++// file directory (tag 0x0112), 1 when it records none; empty when the data
++// does not parse.
++std::optional<uint32_t> read_exif_orientation(std::string_view tiff) {
++  if (tiff.size() < 8) {
++    return std::nullopt;
++  }
++  bool little = false;
++  if (tiff.starts_with("II")) {
++    little = true;
++  } else if (!tiff.starts_with("MM")) {
++    return std::nullopt;
++  }
++  const auto u16 = [&](size_t at) { return little ? le16(tiff, at) : be16(tiff, at); };
++  const auto u32 = [&](size_t at) { return little ? le32(tiff, at) : be32(tiff, at); };
++  if (u16(2) != 42) {
++    return std::nullopt;
++  }
++  const size_t directory = u32(4);
++  if (directory > tiff.size() || tiff.size() - directory < 2) {
++    return std::nullopt;
++  }
++  const size_t count = u16(directory);
++  for (size_t i = 0; i < count; ++i) {
++    const size_t entry = directory + 2 + 12 * i;
++    if (entry > tiff.size() || tiff.size() - entry < 12) {
++      return std::nullopt;
++    }
++    if (u16(entry) == 0x0112) {
++      // A SHORT, which is in the first two bytes of the value field.
++      return u16(entry + 8);
++    }
++  }
++  return 1;
++}
++
 +std::optional<ImageSize> read_jpeg(std::string_view data) {
++  // Orientations 5 to 8 turn the image a quarter, which browsers apply.
++  bool turned = false;
 +  for (size_t at = 2; at + 4 <= data.size();) {
 +    if (byte(data, at) != 0xFF) {
 +      return std::nullopt;
@@ -199,14 +237,22 @@ index 0000000..ea4e983
 +      return std::nullopt;
 +    }
 +    if (marker == 0xE1 && data.substr(at + 4, 6) == std::string_view("Exif\0\0", 6)) {
-+      return std::nullopt;
++      // The block's length counts its own two bytes and the six of "Exif\0\0".
++      if (length < 8 || at + 2 + length > data.size()) {
++        return std::nullopt;
++      }
++      const auto orientation = read_exif_orientation(data.substr(at + 10, length - 8));
++      if (!orientation || *orientation < 1 || *orientation > 8) {
++        return std::nullopt;
++      }
++      turned = *orientation >= 5;
 +    }
 +    const bool frame = marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC;
 +    if (frame) {
 +      if (at + 9 > data.size()) {
 +        return std::nullopt;
 +      }
-+      return sized(be16(data, at + 7), be16(data, at + 5));
++      return turned ? sized(be16(data, at + 5), be16(data, at + 7)) : sized(be16(data, at + 7), be16(data, at + 5));
 +    }
 +    at += 2 + length;
 +  }
@@ -394,10 +440,10 @@ index 0000000..ea4e983
 +}
 diff --git a/src/image_size.hpp b/src/image_size.hpp
 new file mode 100644
-index 0000000..017f824
+index 0000000..909d84d
 --- /dev/null
 +++ b/src/image_size.hpp
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,19 @@
 +#pragma once
 +
 +#include <cstdint>
@@ -413,7 +459,8 @@ index 0000000..017f824
 +// The size a browser shows an image at, read from its header without decoding
 +// it: PNG, GIF, JPEG, WebP, BMP and AVIF. Empty for any other format, a header
 +// that does not parse, and an image whose shown size the header alone does not
-+// settle: EXIF orientation, or an AVIF crop, rotation or non-square pixels.
++// settle: EXIF orientation in a PNG, or an AVIF crop, rotation or non-square
++// pixels. A JPEG's EXIF orientation is applied.
 +std::optional<ImageSize> read(std::string_view data);
 +}  // namespace image_size
 diff --git a/src/importer.cpp b/src/importer.cpp
