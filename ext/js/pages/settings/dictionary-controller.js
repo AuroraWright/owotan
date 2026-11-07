@@ -632,8 +632,6 @@ export class DictionaryController {
         this._dictionaryTaskQueue = [];
         /** @type {boolean} */
         this._isTaskQueueRunning = false;
-        /** @type {(() => void) | null} */
-        this._onDictionariesUpdate = null;
     }
 
     /** @type {import('./modal-controller.js').ModalController} */
@@ -904,10 +902,6 @@ export class DictionaryController {
         this._dictionaries = dictionaries;
 
         await this._updateEntries();
-
-        if (this._onDictionariesUpdate) {
-            this._onDictionariesUpdate();
-        }
     }
 
     /** */
@@ -1401,12 +1395,11 @@ export class DictionaryController {
      */
     async _deleteDictionaryInternal(dictionaryTitle) {
         await this._settingsController.application.api.deleteDictionary(dictionaryTitle);
-        /** @type {import('core').DeferredPromiseDetails<void>} */
-        const {promise: dictionariesUpdatePromise, resolve} = deferPromise();
-        this._onDictionariesUpdate = resolve;
-        void this._settingsController.application.api.triggerDatabaseUpdated('dictionary', 'delete');
-        await dictionariesUpdatePromise;
-        this._onDictionariesUpdate = null;
+        // Every page is told that the database changed, but this one does not wait to hear it: a message to an
+        // extension page in Safari goes through a port the page opens, and is lost when it is sent while the page
+        // has none. It reads the dictionaries itself once the backend has read them again.
+        await this._settingsController.application.api.triggerDatabaseUpdated('dictionary', 'delete');
+        await this._onDatabaseUpdated();
     }
 
     /**
