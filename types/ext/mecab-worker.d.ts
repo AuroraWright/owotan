@@ -39,7 +39,7 @@ export type Tagger = {
     destroy: () => void;
 };
 
-/** The messages of the native MeCab component, and those for the dictionaries, which only the worker answers. */
+/** The messages that the native MeCab component answered, and those for the dictionaries. */
 export type Request = {
     action: string;
     params: RequestParams;
@@ -51,6 +51,11 @@ export type RequestParams = {
     dictionaries?: string[];
     archive?: ArrayBuffer;
     name?: string;
+};
+
+/** Passes a port on which the worker answers requests. */
+export type ConnectMessage = {
+    action: 'connect';
 };
 
 export type Response = {

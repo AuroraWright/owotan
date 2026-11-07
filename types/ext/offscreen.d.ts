@@ -164,6 +164,10 @@ type McApiSurface = {
         params: void;
         return: void;
     };
+    connectToMecabWorker: {
+        params: void;
+        return: void;
+    };
     dummy: {
         params: void;
         return: void;

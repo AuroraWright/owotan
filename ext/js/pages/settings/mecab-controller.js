@@ -34,16 +34,17 @@ export class MecabController {
         /** @type {boolean} */
         this._testActive = false;
         /**
-         * Imports and removes dictionaries where MeCab runs in the extension. The backend's MeCab loads them again.
+         * Imports and removes dictionaries. The backend's MeCab loads them again.
          * @type {Mecab}
          */
         this._mecab = new Mecab();
         /** @type {HTMLElement} */
         this._dictionaryList = querySelectorNotNull(document, '#mecab-dictionary-list');
-        /** @type {HTMLButtonElement} */
-        this._importButton = querySelectorNotNull(document, '#mecab-dictionary-import-button');
-        /** @type {HTMLInputElement} */
-        this._importFileInput = querySelectorNotNull(document, '#mecab-dictionary-import-file');
+        /**
+         * Download the dictionaries that the native component's installer offers, from the same archives.
+         * @type {HTMLButtonElement[]}
+         */
+        this._downloadButtons = [...document.querySelectorAll('button.mecab-dictionary-download-button')].map((element) => /** @type {HTMLButtonElement} */ (element));
         /** @type {HTMLElement} */
         this._importResultsContainer = querySelectorNotNull(document, '#mecab-dictionary-import-results');
     }
@@ -51,12 +52,11 @@ export class MecabController {
     /** */
     prepare() {
         this._testButton.addEventListener('click', this._onTestButtonClick.bind(this), false);
-        if (this._mecab.hasStoredDictionaries()) {
-            this._mecab.setEnabled(true);
-            this._importButton.addEventListener('click', () => this._importFileInput.click(), false);
-            this._importFileInput.addEventListener('change', this._onImportFileChange.bind(this), false);
-            void this._updateDictionaryList();
+        this._mecab.setEnabled(true);
+        for (const button of this._downloadButtons) {
+            button.addEventListener('click', () => { void this._downloadDictionary(button); }, false);
         }
+        void this._updateDictionaryList();
     }
 
     // Private
@@ -90,24 +90,77 @@ export class MecabController {
             fragment.appendChild(item);
         }
         this._dictionaryList.replaceChildren(fragment);
+        for (const button of this._downloadButtons) {
+            button.hidden = names.includes(button.dataset.dictionary ?? '');
+        }
     }
 
-    /** */
-    async _onImportFileChange() {
-        const file = this._importFileInput.files?.[0];
-        this._importFileInput.value = '';
-        if (typeof file === 'undefined') { return; }
-        this._importButton.disabled = true;
-        setStatus(this._importResultsContainer, 'Importing\u2026', false);
+    /**
+     * @param {HTMLButtonElement} button
+     */
+    async _downloadDictionary(button) {
+        const url = button.dataset.url;
+        if (typeof url !== 'string') { return; }
+        this._setDownloadButtonsDisabled(true);
         try {
-            const name = await this._mecab.importDictionary(await file.arrayBuffer());
+            setStatus(this._importResultsContainer, 'Downloading\u2026', false);
+            let response;
+            try {
+                response = await fetch(url, {credentials: 'omit', redirect: 'follow', referrerPolicy: 'no-referrer'});
+            } catch (e) {
+                throw new Error(`Could not download the dictionary: ${toError(e).message}`);
+            }
+            if (!response.ok) {
+                throw new Error(`Could not download the dictionary: ${response.status}`);
+            }
+            const archive = await this._readDownload(response);
+            setStatus(this._importResultsContainer, 'Importing\u2026', false);
+            const name = await this._mecab.importDictionary(archive);
             setStatus(this._importResultsContainer, `Imported ${name}`, false);
         } catch (e) {
             setStatus(this._importResultsContainer, toError(e).message, true);
         } finally {
-            this._importButton.disabled = false;
+            this._setDownloadButtonsDisabled(false);
         }
         await this._updateDictionaryList();
+    }
+
+    /**
+     * Reads a download, showing how much of it has arrived.
+     * @param {Response} response
+     * @returns {Promise<ArrayBuffer>}
+     */
+    async _readDownload(response) {
+        const total = Number(response.headers.get('Content-Length'));
+        const reader = response.body !== null ? response.body.getReader() : null;
+        if (reader === null || !Number.isFinite(total) || total <= 0) {
+            return await response.arrayBuffer();
+        }
+        /** @type {Uint8Array[]} */
+        const chunks = [];
+        let loaded = 0;
+        let percent = 0;
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) { break; }
+            chunks.push(value);
+            loaded += value.byteLength;
+            const percent2 = Math.min(100, Math.floor(loaded / total * 100));
+            if (percent2 !== percent) {
+                percent = percent2;
+                setStatus(this._importResultsContainer, `Downloading\u2026 ${percent}%`, false);
+            }
+        }
+        return await new Blob(chunks).arrayBuffer();
+    }
+
+    /**
+     * @param {boolean} disabled
+     */
+    _setDownloadButtonsDisabled(disabled) {
+        for (const button of this._downloadButtons) {
+            button.disabled = disabled;
+        }
     }
 
     /**

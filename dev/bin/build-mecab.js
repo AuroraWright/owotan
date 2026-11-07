@@ -15,8 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Builds MeCab into ext/lib/mecab.{js,wasm}, for browsers whose extensions cannot
-// reach the native MeCab component, such as Safari.
+// Builds MeCab into ext/lib/mecab.{js,wasm}, which every browser runs in a worker.
 // Needs git, cmake, ninja and an activated Emscripten SDK (emcmake on PATH).
 // The pinned MeCab commit is checked out under node_modules/.cache, which no
 // linter or test runner looks in.

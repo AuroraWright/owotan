@@ -165,6 +165,21 @@ export class OffscreenProxy {
             void this.sendMessagePromise({action: 'createAndRegisterPortOffscreen'});
         }
     }
+
+    /**
+     * Connects to the MeCab worker of the offscreen document, as the service worker cannot start workers.
+     * @returns {Promise<MessagePort>}
+     * @throws {Error}
+     */
+    async connectToMecabWorker() {
+        if (this._currentOffscreenPort === null) {
+            void this.sendMessagePromise({action: 'createAndRegisterPortOffscreen'});
+            throw new Error('The offscreen document is not connected yet');
+        }
+        const channel = new MessageChannel();
+        this.sendMessageViaPort({action: 'connectToMecabWorker'}, [channel.port2]);
+        return channel.port1;
+    }
 }
 
 export class DictionaryDatabaseProxy {

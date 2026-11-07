@@ -48,9 +48,10 @@ const SKIP_PATTERN = /[\s・]/u;
 const LINE_BREAK_PATTERN = /\r\n|[\n\v\f\r\u001c-\u001e\u0085\u2028\u2029]/u;
 
 /**
- * Runs MeCab, compiled to WebAssembly (dev/mecab), for browsers whose extensions cannot reach the native MeCab
- * component, such as Safari. It answers the messages the native component answers, with the same results, and
- * also imports and removes the dictionaries, which are kept in IndexedDB (BlobFileStore), by their names.
+ * Runs MeCab, compiled to WebAssembly (dev/mecab). It answers the messages that the native MeCab component answered,
+ * with the same results, and also imports and removes the dictionaries, which are kept in IndexedDB (BlobFileStore),
+ * by their names. Requests come from the worker's creator, or from a port that it passes with a `connect` message, as
+ * Chrome's offscreen document does for the service worker.
  */
 class MecabWorker {
     constructor() {
@@ -74,9 +75,23 @@ class MecabWorker {
     // Private
 
     /**
-     * @param {MessageEvent<import('mecab-worker').Request>} event
+     * @param {MessageEvent<import('mecab-worker').Request|import('mecab-worker').ConnectMessage>} event
      */
-    async _onMessage({data: {action, params, sequence}}) {
+    _onMessage({data, ports}) {
+        if (data.action === 'connect') {
+            const port = ports[0];
+            port.addEventListener('message', (/** @type {MessageEvent<import('mecab-worker').Request>} */ event) => { void this._onRequest(event.data, port); });
+            port.start();
+            return;
+        }
+        void this._onRequest(/** @type {import('mecab-worker').Request} */ (data), self);
+    }
+
+    /**
+     * @param {import('mecab-worker').Request} request
+     * @param {{postMessage: (message: import('mecab-worker').Response) => void}} target
+     */
+    async _onRequest({action, params, sequence}, target) {
         /** @type {import('mecab-worker').Response} */
         let response;
         try {
@@ -84,7 +99,7 @@ class MecabWorker {
         } catch (e) {
             response = {sequence, error: toError(e).message};
         }
-        self.postMessage(response);
+        target.postMessage(response);
     }
 
     /**
@@ -95,8 +110,6 @@ class MecabWorker {
      */
     async _invoke(action, params) {
         switch (action) {
-            case 'get_version':
-                return {version: 1};
             case 'parse_text':
                 return await this._parseText(params.text ?? '', params.dictionaries);
             case 'get_dictionaries':

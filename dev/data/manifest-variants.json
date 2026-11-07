@@ -142,9 +142,6 @@
                 "background.html",
                 "lib/hoshidicts.js",
                 "lib/hoshidicts.wasm",
-                "js/comm/mecab-worker-main.js",
-                "lib/mecab.js",
-                "lib/mecab.wasm",
                 "css/safari-page.css"
             ]
         },
@@ -176,9 +173,6 @@
                 "background.html",
                 "lib/hoshidicts.js",
                 "lib/hoshidicts.wasm",
-                "js/comm/mecab-worker-main.js",
-                "lib/mecab.js",
-                "lib/mecab.wasm",
                 "css/safari-page.css"
             ]
         },
@@ -208,9 +202,6 @@
                 "background.html",
                 "lib/hoshidicts.js",
                 "lib/hoshidicts.wasm",
-                "js/comm/mecab-worker-main.js",
-                "lib/mecab.js",
-                "lib/mecab.wasm",
                 "css/safari-page.css"
             ]
         },
@@ -320,9 +311,6 @@
                 "js/background/offscreen-main.js",
                 "lib/hoshidicts-threads.js",
                 "lib/hoshidicts-threads.wasm",
-                "js/comm/mecab-worker-main.js",
-                "lib/mecab.js",
-                "lib/mecab.wasm",
                 "css/safari-page.css"
             ]
         },
@@ -375,9 +363,6 @@
                 "js/background/offscreen-main.js",
                 "lib/hoshidicts-threads.js",
                 "lib/hoshidicts-threads.wasm",
-                "js/comm/mecab-worker-main.js",
-                "lib/mecab.js",
-                "lib/mecab.wasm",
                 "css/safari-page.css"
             ]
         },
@@ -476,9 +461,6 @@
                 "background.html",
                 "lib/hoshidicts.js",
                 "lib/hoshidicts.wasm",
-                "js/comm/mecab-worker-main.js",
-                "lib/mecab.js",
-                "lib/mecab.wasm",
                 "css/safari-page.css"
             ]
         }

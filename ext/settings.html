@@ -1673,21 +1673,19 @@
                 </p>
             </div>
         </div>
-        <div class="settings-item advanced-only jp-only" data-hide-for-browser="firefox-mobile">
+        <div class="settings-item advanced-only jp-only">
             <div class="settings-item-inner">
                 <div class="settings-item-left">
-                    <div class="settings-item-invalid-indicator"></div>
                     <div class="settings-item-label">
                         Parse sentences using <a href="https://en.wikipedia.org/wiki/MeCab" target="_blank" rel="noopener noreferrer">MeCab</a>
                     </div>
-                    <div class="settings-item-description">Sentence words are parsed using a third-party program. Japanese only.</div>
                     <div class="settings-item-description">
-                        This option may send search query data outside of Yomitan for parsing<span data-show-for-browser="firefox firefox-mobile"> (<a href="https://addons.mozilla.org/en-US/firefox/addon/yomitan/privacy/">Privacy Policy</a>)</span>.
+                        Sentence words are parsed using a third-party program. Japanese only.
                         <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
                     </div>
                 </div>
                 <div class="settings-item-right">
-                    <label class="toggle"><input type="checkbox" class="permissions-toggle" data-permissions-setting="parsing.enableMecabParser" data-required-permissions="nativeMessaging"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
+                    <label class="toggle"><input type="checkbox" data-setting="parsing.enableMecabParser"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
                 </div>
             </div>
             <div class="settings-item-children more" hidden>
@@ -1695,24 +1693,18 @@
                     MeCab is a third-party program which uses its own dictionaries and parsing algorithm to decompose sentences into individual words.
                     MeCab may provide more accurate parsing results than Yomitan's internal parser.
                 </p>
-                <p data-hide-for-browser="safari">
-                    In order for Yomitan to use it, both MeCab and a native messaging component must be installed.
-                    A setup guide can be found <a href="https://github.com/yomidevs/yomitan-mecab-installer/blob/master/README.md" target="_blank" rel="noopener noreferrer">here</a>.
+                <p>
+                    In this version, MeCab runs inside Yomitan, with a MeCab dictionary downloaded here.
+                    These are the dictionaries that the <a href="https://github.com/yomidevs/yomitan-mecab-installer/blob/master/README.md" target="_blank" rel="noopener noreferrer">Yomitan MeCab installer</a> offers.
+                    unidic-mecab-translate is usually more accurate, but it takes 200 MB once downloaded, which may be too much for a phone.
+                    ipadic takes 53 MB.
                 </p>
-                <div data-show-for-browser="safari">
-                    <p>
-                        In Safari, MeCab runs inside Yomitan, with a MeCab dictionary imported here.
-                        Yomitan accepts the archives that the <a href="https://github.com/yomidevs/yomitan-mecab-installer/blob/master/README.md" target="_blank" rel="noopener noreferrer">native component's installer</a> downloads:
-                        <a href="https://github.com/starxeras/yomitan-mecab-installer/releases/download/ipadic/ipadic.zip" target="_blank" rel="noopener noreferrer">ipadic</a> (13 MB)
-                        or <a href="https://github.com/starxeras/yomitan-mecab-installer/releases/download/unidic/unidic.zip" target="_blank" rel="noopener noreferrer">unidic-mecab-translate</a> (191 MB, which may be too large for a phone).
-                    </p>
-                    <div id="mecab-dictionary-list"></div>
-                    <div class="margin-above flex-row-nowrap">
-                        <button type="button" id="mecab-dictionary-import-button">Import Dictionary</button>
-                        <div hidden><input type="file" id="mecab-dictionary-import-file" accept=".zip,application/zip"></div>
-                        <div id="mecab-dictionary-import-results" class="flex-margin-left" hidden></div>
-                    </div>
+                <div id="mecab-dictionary-list"></div>
+                <div class="margin-above mecab-dictionary-buttons">
+                    <button type="button" class="mecab-dictionary-download-button" data-dictionary="unidic-mecab-translate" data-url="https://github.com/starxeras/yomitan-mecab-installer/releases/download/unidic/unidic.zip">Download unidic-mecab-translate (43 MB)</button>
+                    <button type="button" class="mecab-dictionary-download-button" data-dictionary="ipadic" data-url="https://github.com/starxeras/yomitan-mecab-installer/releases/download/ipadic/ipadic.zip">Download ipadic (13 MB)</button>
                 </div>
+                <div id="mecab-dictionary-import-results" class="margin-above" hidden></div>
                 <div class="margin-above flex-row-nowrap">
                     <button type="button" id="test-mecab-button">Test</button>
                     <div id="test-mecab-results" class="flex-margin-left" hidden></div>

@@ -46,6 +46,12 @@ export class Offscreen {
             '#clipboard-paste-target',
             '#clipboard-rich-content-paste-target',
         );
+        /**
+         * Runs MeCab for the service worker, which cannot start workers itself. It is started for the first connection
+         * and kept, with the dictionaries that it has read, when the service worker stops.
+         * @type {?Worker}
+         */
+        this._mecabWorker = null;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('offscreen').ApiMap} */
@@ -72,6 +78,7 @@ export class Offscreen {
         /** @type {import('offscreen').McApiMap} */
         this._mcApiMap = createApiMap([
             ['connectToDatabaseWorker', this._connectToDatabaseWorkerHandler.bind(this)],
+            ['connectToMecabWorker', this._connectToMecabWorkerHandler.bind(this)],
         ]);
 
         /** @type {?Promise<void>} */
@@ -210,6 +217,16 @@ export class Offscreen {
     /** @type {import('offscreen').McApiHandler<'connectToDatabaseWorker'>} */
     async _connectToDatabaseWorkerHandler(_params, ports) {
         await this._dictionaryDatabase.connectToDatabaseWorker(ports[0]);
+    }
+
+    /** @type {import('offscreen').McApiHandler<'connectToMecabWorker'>} */
+    _connectToMecabWorkerHandler(_params, ports) {
+        if (this._mecabWorker === null) {
+            this._mecabWorker = new Worker('/js/comm/mecab-worker-main.js', {type: 'module'});
+        }
+        /** @type {import('mecab-worker').ConnectMessage} */
+        const message = {action: 'connect'};
+        this._mecabWorker.postMessage(message, [ports[0]]);
     }
 
     /** @type {import('offscreen').ApiHandler<'sanitizeCSSOffscreen'>} */

@@ -18,21 +18,20 @@
 
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {toError} from '../core/to-error.js';
-import {isSafariExtension} from '../extension/app-extension.js';
 
 /**
- * This class is used to connect Yomitan to a native component that is
- * used to parse text into individual terms.
- * Safari's extensions cannot reach native components other than their app's, so there it runs MeCab,
- * compiled to WebAssembly, in a worker (mecab-worker-main.js), which answers the same messages.
+ * This class is used to parse text into individual terms with MeCab, compiled to WebAssembly, which runs in a worker
+ * (mecab-worker-main.js) with the dictionaries that it stores.
  */
 export class Mecab {
     /**
      * Creates a new instance of the class.
+     * @param {?() => Promise<MessagePort>} [connectWorker] Connects to a worker that runs elsewhere, for contexts that
+     *   cannot start workers, such as Chrome's service worker. By default, the worker is started here.
      */
-    constructor() {
-        /** @type {boolean} */
-        this._useWorker = isSafariExtension();
+    constructor(connectWorker = null) {
+        /** @type {?() => Promise<MessagePort>} */
+        this._connectWorker = connectWorker;
         /** @type {?import('mecab').Connection} */
         this._port = null;
         /** @type {number} */
@@ -45,11 +44,7 @@ export class Mecab {
          * The worker reads the dictionaries for its first request, and an import writes one.
          * @type {number}
          */
-        this._timeout = this._useWorker ? 60000 : 5000;
-        /** @type {number} */
-        this._version = 1;
-        /** @type {?number} */
-        this._remoteVersion = null;
+        this._timeout = 60000;
         /** @type {boolean} */
         this._enabled = false;
         /** @type {?Promise<void>} */
@@ -85,7 +80,7 @@ export class Mecab {
     }
 
     /**
-     * Returns whether or not the connection to the native application is active.
+     * Returns whether or not the connection to the worker is active.
      * @returns {boolean} `true` if the connection is active, `false` otherwise.
      */
     isConnected() {
@@ -98,27 +93,6 @@ export class Mecab {
      */
     isActive() {
         return (this._invocations.size > 0);
-    }
-
-    /**
-     * Gets the local API version being used.
-     * @returns {number} An integer representing the API version that Yomitan uses.
-     */
-    getLocalVersion() {
-        return this._version;
-    }
-
-    /**
-     * Gets the version of the MeCab component.
-     * @returns {Promise<?number>} The version of the MeCab component, or `null` if the component was not found.
-     */
-    async getVersion() {
-        try {
-            await this._setupPortWrapper();
-        } catch (e) {
-            // NOP
-        }
-        return this._remoteVersion;
     }
 
     /**
@@ -148,15 +122,7 @@ export class Mecab {
     }
 
     /**
-     * Whether MeCab runs in the extension, with dictionaries it stores itself, rather than as a native component.
-     * @returns {boolean}
-     */
-    hasStoredDictionaries() {
-        return this._useWorker;
-    }
-
-    /**
-     * Gets the names of the stored dictionaries. See `hasStoredDictionaries`.
+     * Gets the names of the stored dictionaries.
      * @returns {Promise<string[]>}
      */
     async getDictionaries() {
@@ -165,7 +131,7 @@ export class Mecab {
     }
 
     /**
-     * Stores a dictionary from an archive like those the native component's installer downloads. See `hasStoredDictionaries`.
+     * Stores a dictionary from an archive like those the native MeCab component's installer downloads.
      * @param {ArrayBuffer} archive
      * @returns {Promise<string>} The dictionary's name.
      */
@@ -175,7 +141,7 @@ export class Mecab {
     }
 
     /**
-     * Removes a stored dictionary. See `hasStoredDictionaries`.
+     * Removes a stored dictionary.
      * @param {string} name
      */
     async deleteDictionary(name) {
@@ -210,10 +176,9 @@ export class Mecab {
     /**
      * @returns {void}
      */
-    _onDisconnect() {
+    _onError() {
         if (this._port === null) { return; }
-        const e = chrome.runtime.lastError;
-        const error = new Error(e ? e.message : 'MeCab disconnected');
+        const error = new Error('MeCab stopped unexpectedly');
         for (const {reject, timer} of this._invocations.values()) {
             clearTimeout(timer);
             reject(error);
@@ -404,42 +369,27 @@ export class Mecab {
      * @returns {Promise<void>}
      */
     async _setupPort() {
-        /** @type {import('mecab').Connection} */
-        let port;
-        if (this._useWorker) {
-            const worker = new Worker(new URL('mecab-worker-main.js', import.meta.url), {type: 'module'});
-            this._eventListeners.addEventListener(worker, 'message', (/** @type {MessageEvent<unknown>} */ {data}) => this._onMessage(data));
-            this._eventListeners.addEventListener(worker, 'error', this._onDisconnect.bind(this));
-            port = {
-                postMessage: (message) => worker.postMessage(message),
-                disconnect: () => worker.terminate(),
+        /** @type {MessagePort|Worker} */
+        let target;
+        try {
+            target = this._connectWorker !== null ? await this._connectWorker() : new Worker(new URL('mecab-worker-main.js', import.meta.url), {type: 'module'});
+        } catch (e) {
+            this._setupPortPromise = null;
+            throw e;
+        }
+        this._eventListeners.addEventListener(target, 'message', (/** @type {MessageEvent<unknown>} */ {data}) => this._onMessage(data));
+        this._eventListeners.addEventListener(target, 'error', this._onError.bind(this));
+        if (target instanceof MessagePort) {
+            target.start();
+            this._port = {
+                postMessage: (message) => target.postMessage(message),
+                disconnect: () => target.close(),
             };
         } else {
-            const nativePort = chrome.runtime.connectNative('yomitan_mecab');
-            this._eventListeners.addListener(nativePort.onMessage, this._onMessage.bind(this));
-            this._eventListeners.addListener(nativePort.onDisconnect, this._onDisconnect.bind(this));
-            port = nativePort;
-        }
-        this._port = port;
-
-        try {
-            const data = await this._invoke('get_version', {});
-            if (typeof data !== 'object' || data === null) {
-                throw new Error('Invalid version');
-            }
-            const {version} = /** @type {import('core').SerializableObject} */ (data);
-            if (typeof version !== 'number') {
-                throw new Error('Invalid version');
-            }
-            this._remoteVersion = version;
-            if (version !== this._version) {
-                throw new Error(`Unsupported MeCab native messenger version ${version}. Yomitan supports version ${this._version}.`);
-            }
-        } catch (e) {
-            if (this._port === port) {
-                this._clearPort();
-            }
-            throw e;
+            this._port = {
+                postMessage: (message) => target.postMessage(message),
+                disconnect: () => target.terminate(),
+            };
         }
     }
 

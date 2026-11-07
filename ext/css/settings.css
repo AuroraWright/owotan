@@ -2737,6 +2737,13 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     display: none;
 }
 
+.mecab-dictionary-buttons {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: center;
+    gap: 0.5em;
+}
+
 .anki-sync-login-form,
 .settings-item-right.anki-sync-buttons {
     display: flex;

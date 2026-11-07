@@ -92,9 +92,6 @@ export class Backend {
          * @type {Map<string, import('core').DeferredPromiseDetails<boolean>>}
          */
         this._ankiMobileNotes = new Map();
-        /** @type {Mecab} */
-        this._mecab = new Mecab();
-
         if (!chrome.offscreen) {
             /** @type {?OffscreenProxy} */
             this._offscreen = null;
@@ -118,6 +115,9 @@ export class Backend {
             /** @type {ClipboardReader|ClipboardReaderProxy} */
             this._clipboardReader = new ClipboardReaderProxy(this._offscreen);
         }
+        const offscreen = this._offscreen;
+        /** @type {Mecab} */
+        this._mecab = new Mecab(offscreen !== null ? () => offscreen.connectToMecabWorker() : null);
 
         /** @type {ClipboardMonitor} */
         this._clipboardMonitor = new ClipboardMonitor(this._clipboardReader);
@@ -1285,30 +1285,10 @@ export class Backend {
             throw new Error('MeCab not enabled');
         }
 
-        let permissionsOkay = false;
-        try {
-            permissionsOkay = await hasPermissions({permissions: ['nativeMessaging']});
-        } catch (e) {
-            // NOP
-        }
-        if (!permissionsOkay) {
-            throw new Error('Insufficient permissions');
-        }
-
         const disconnect = !this._mecab.isConnected();
         try {
-            const version = await this._mecab.getVersion();
-            if (version === null) {
-                throw new Error('Could not connect to native MeCab component');
-            }
-
-            const localVersion = this._mecab.getLocalVersion();
-            if (version !== localVersion) {
-                throw new Error(`MeCab component version not supported: ${version}`);
-            }
-
-            if (this._mecab.hasStoredDictionaries() && (await this._mecab.getDictionaries()).length === 0) {
-                throw new Error('No MeCab dictionary has been imported');
+            if ((await this._mecab.getDictionaries()).length === 0) {
+                throw new Error('No MeCab dictionary has been downloaded');
             }
         } finally {
             // Disconnect if the connection was previously disconnected
