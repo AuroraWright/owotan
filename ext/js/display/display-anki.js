@@ -116,6 +116,8 @@ export class DisplayAnki {
         this._cardFormats = [];
         /** @type {import('settings').DictionariesOptions} */
         this._dictionaries = [];
+        /** @type {?Map<string, string>} */
+        this._dictionaryStylesMap = null;
         /** @type {HTMLElement} */
         this._menuContainer = querySelectorNotNull(document, '#popup-menus');
         /** @type {(event: MouseEvent) => void} */
@@ -170,7 +172,7 @@ export class DisplayAnki {
                 glossaryLayoutMode: this._glossaryLayoutMode,
                 compactTags: this._compactTags,
                 marker: 'test',
-                dictionaryStylesMap: this._ankiNoteBuilder.getDictionaryStylesMap(this._dictionaries),
+                dictionaryStylesMap: this._getDictionaryStylesMap(),
             });
         } catch (e) {
             ankiNoteDataException = e;
@@ -259,6 +261,7 @@ export class DisplayAnki {
         this._audioDownloadIdleTimeout = (Number.isFinite(downloadTimeout) && downloadTimeout > 0 ? downloadTimeout : null);
         this._cardFormats = cardFormats;
         this._dictionaries = dictionaries;
+        this._dictionaryStylesMap = null;
         this._forceSync = forceSync;
         this._noteDupeCheckFirst = noteDupeCheckFirst;
 
@@ -1326,6 +1329,18 @@ export class DisplayAnki {
     }
 
     /**
+     * Gets the styles of the dictionaries, which are sanitized once for all the notes of the options, as sanitizing
+     * parses each dictionary's styles.
+     * @returns {Map<string, string>}
+     */
+    _getDictionaryStylesMap() {
+        if (this._dictionaryStylesMap === null) {
+            this._dictionaryStylesMap = this._ankiNoteBuilder.getDictionaryStylesMap(this._dictionaries);
+        }
+        return this._dictionaryStylesMap;
+    }
+
+    /**
      * @param {import('dictionary').DictionaryEntry} dictionaryEntry
      * @param {number} cardFormatIndex
      * @param {import('anki-note-builder').Requirement[]} requirements
@@ -1348,7 +1363,7 @@ export class DisplayAnki {
         const details = this._ankiNoteBuilder.getDictionaryEntryDetailsForNote(dictionaryEntry);
         const audioDetails = this._getAnkiNoteMediaAudioDetails(details);
         const optionsContext = this._display.getOptionsContext();
-        const dictionaryStylesMap = this._ankiNoteBuilder.getDictionaryStylesMap(this._dictionaries);
+        const dictionaryStylesMap = this._getDictionaryStylesMap();
 
         const {note, errors, requirements: outputRequirements} = await this._ankiNoteBuilder.createNote({
             dictionaryEntry,
