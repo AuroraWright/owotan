@@ -62,12 +62,12 @@ export class DisplayAudio {
             ['jisho', 'Jisho.org'],
             ['lingua-libre', 'Lingua Libre'],
             ['wiktionary', 'Wiktionary'],
+            ['forvo', 'Forvo'],
             ['text-to-speech', 'Text-to-speech'],
             ['text-to-speech-reading', 'Text-to-speech (Kana reading)'],
             ['custom', 'Custom URL'],
             ['custom-json', 'Custom URL (JSON)'],
             ['local-android-db', 'Local android.db'],
-            ['forvo', 'Forvo'],
         ]);
         /** @type {?boolean} */
         this._enableDefaultAudioSources = null;
