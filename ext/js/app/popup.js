@@ -357,7 +357,10 @@ export class Popup extends EventDispatcher {
      * @param {string} css The CSS rules.
      */
     async setCustomCss(css) {
-        await this._invokeSafe('displaySetCustomCss', {css});
+        // A frame that connects later applies the custom styles from the options itself
+        if (this._frameConnected) {
+            await this._invokeSafe('displaySetCustomCss', {css});
+        }
     }
 
     /**
