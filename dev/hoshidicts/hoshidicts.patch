@@ -41,10 +41,10 @@ index c61d2f7..7583ba5 100644
  
  namespace dictionary_importer {
 diff --git a/include/hoshidicts/query.hpp b/include/hoshidicts/query.hpp
-index dba519f..1a3759f 100644
+index dba519f..6dbf478 100644
 --- a/include/hoshidicts/query.hpp
 +++ b/include/hoshidicts/query.hpp
-@@ -1,6 +1,7 @@
+@@ -1,11 +1,13 @@
  #pragma once
  
  #include <cstdint>
@@ -52,7 +52,13 @@ index dba519f..1a3759f 100644
  #include <memory>
  #include <optional>
  #include <span>
-@@ -94,6 +95,49 @@ struct KanjiResult {
+ #include <string>
+ #include <string_view>
++#include <tuple>
+ #include <unordered_map>
+ #include <vector>
+ 
+@@ -94,6 +96,49 @@ struct KanjiResult {
    std::vector<FrequencyEntry> frequencies;
  };
  
@@ -102,7 +108,7 @@ index dba519f..1a3759f 100644
  struct RawTerm;
  struct RawTerms;
  struct BlobPins;
-@@ -190,6 +234,15 @@ class DictionaryQuery {
+@@ -190,6 +235,22 @@ class DictionaryQuery {
    KanjiResult query_kanji(const std::string& kanji, std::span<const std::string> dictionaries) const;
  
    std::vector<TermResult> query(const std::string& expression) const;
@@ -110,6 +116,13 @@ index dba519f..1a3759f 100644
 +  // row has, whose expression or reading is `key`.
 +  std::vector<TermRow> query_rows(const std::string& key) const;
 +  std::optional<std::string> query_glossary(const std::string& dict_name, uint64_t offset) const;
++  // Tells the paged files of the dictionaries what query_rows of each of
++  // `keys` will read, and the same for query_glossary of each item, a level
++  // of records at a time, as each level is found in the one before it. A file
++  // system that reads in batches can then read each level at once, rather than
++  // record by record.
++  void prefetch_rows(std::span<const std::string> keys) const;
++  void prefetch_glossaries(std::span<const std::tuple<std::string, uint64_t>> items) const;
 +  // The rows a sequenced term dictionary of version 7 or later files under `sequence`.
 +  std::vector<TermRow> query_sequence_rows(const std::string& dict_name, int64_t sequence) const;
 +  std::vector<MetaRow> query_meta_rows(const std::string& key) const;
@@ -118,6 +131,62 @@ index dba519f..1a3759f 100644
  
    std::vector<char> get_media_file(const std::string& dict_name, const std::string& media_path) const;
    // A view into the mapped media.bin; empty when the file is missing and when
+diff --git a/src/blob_file.cpp b/src/blob_file.cpp
+index d72fbba..253ac28 100644
+--- a/src/blob_file.cpp
++++ b/src/blob_file.cpp
+@@ -68,6 +68,36 @@ void BlobFile::copy(uint64_t offset, size_t length, void* out) const {
+   cache_->trim();
+ }
+ 
++void BlobFile::advise(uint64_t offset, size_t length) const {
++  if (!paged() || offset >= size_) {
++    return;
++  }
++  const size_t page_bytes = cache_->page_bytes();
++  const uint64_t end = std::min<uint64_t>(size_, offset + length);
++  // Each run of pages the cache does not hold, with the bytes a page reads past its end.
++  uint64_t run_start = 0;
++  uint64_t run_end = 0;
++  for (uint64_t index = offset / page_bytes; index * page_bytes < end; ++index) {
++    if (cache_->contains(file_id_, index)) {
++      continue;
++    }
++    const uint64_t page_start = index * page_bytes;
++    const uint64_t page_end = std::min<uint64_t>(size_, page_start + page_bytes + memory::page_cache::lookahead_bytes);
++    if (run_end > run_start && page_start <= run_end) {
++      run_end = page_end;
++      continue;
++    }
++    if (run_end > run_start) {
++      reader_.advise(run_start, run_end - run_start);
++    }
++    run_start = page_start;
++    run_end = page_end;
++  }
++  if (run_end > run_start) {
++    reader_.advise(run_start, run_end - run_start);
++  }
++}
++
+ const uint8_t* BlobFile::paged_range(uint64_t offset, size_t length, BlobPins& pins) const {
+   return BlobCursor(*this, offset, pins).bytes(length);
+ }
+diff --git a/src/blob_file.hpp b/src/blob_file.hpp
+index f9df53f..771f668 100644
+--- a/src/blob_file.hpp
++++ b/src/blob_file.hpp
+@@ -38,6 +38,10 @@ class BlobFile {
+   const uint8_t* range(uint64_t offset, size_t length, BlobPins& pins) const {
+     return paged() ? paged_range(offset, length, pins) : mapping_.data + offset;
+   }
++  // Tells a paged file that `length` bytes at `offset` will be read soon, so
++  // that the pages of them the cache does not hold can be read ahead together
++  // (file_reader::advise).
++  void advise(uint64_t offset, size_t length) const;
+   // Scalar index probes copy their slot and release each page immediately;
+   // they need neither the query's pins nor a spill allocation at a boundary.
+   void copy(uint64_t offset, size_t length, void* out) const;
 diff --git a/src/image_size.cpp b/src/image_size.cpp
 new file mode 100644
 index 0000000..5c255c6
@@ -959,11 +1028,84 @@ index 7e4a7b4..26e366c 100644
  bool parse_pitch(std::string_view content, ParsedPitch& out);
  bool parse_ipa(std::string_view content, ParsedPitch& out);
  };
+diff --git a/src/memory/memory.cpp b/src/memory/memory.cpp
+index 83bcee4..f4f7f49 100644
+--- a/src/memory/memory.cpp
++++ b/src/memory/memory.cpp
+@@ -266,6 +266,17 @@ bool file_reader::read(void* out, size_t len, uint64_t offset) const {
+   return true;
+ }
+ 
++void file_reader::advise(uint64_t offset, size_t len) const {
++#if !defined(_WIN32) && defined(POSIX_FADV_WILLNEED)
++  if (fd_ >= 0) {
++    posix_fadvise(fd_, static_cast<off_t>(offset), static_cast<off_t>(len), POSIX_FADV_WILLNEED);
++  }
++#else
++  (void)offset;
++  (void)len;
++#endif
++}
++
+ void file_reader::close() {
+ #ifdef _WIN32
+   if (handle_ != nullptr) {
+diff --git a/src/memory/memory.hpp b/src/memory/memory.hpp
+index 16b8453..b07761c 100644
+--- a/src/memory/memory.hpp
++++ b/src/memory/memory.hpp
+@@ -43,6 +43,9 @@ class file_reader {
+   // Copies `len` bytes at `offset` into `out`; false on an I/O error or a
+   // range beyond the end of the file.
+   bool read(void* out, size_t len, uint64_t offset) const;
++  // Tells the system that `len` bytes at `offset` will be read soon. Only a
++  // hint, which a file system that reads in batches can read ahead by.
++  void advise(uint64_t offset, size_t len) const;
+ 
+  private:
+   void close();
+diff --git a/src/memory/page_cache.cpp b/src/memory/page_cache.cpp
+index d639316..aeca4e1 100644
+--- a/src/memory/page_cache.cpp
++++ b/src/memory/page_cache.cpp
+@@ -60,6 +60,11 @@ std::shared_ptr<const page> page_cache::get(uint64_t file_id, const file_reader&
+   return fresh;
+ }
+ 
++bool page_cache::contains(uint64_t file_id, uint64_t index) const {
++  std::lock_guard lock(mutex_);
++  return index_.contains(key{.file = file_id, .index = index});
++}
++
+ void page_cache::forget(uint64_t file_id) {
+   std::lock_guard lock(mutex_);
+   for (auto it = lru_.begin(); it != lru_.end();) {
+diff --git a/src/memory/page_cache.hpp b/src/memory/page_cache.hpp
+index 1debfb3..c524591 100644
+--- a/src/memory/page_cache.hpp
++++ b/src/memory/page_cache.hpp
+@@ -55,6 +55,8 @@ class page_cache {
+   std::shared_ptr<const page> get(uint64_t file_id, const file_reader& file, uint64_t index,
+                                 page_kind kind = page_kind::entries);
+ 
++  // Whether the cache holds page `index` of `file`.
++  bool contains(uint64_t file_id, uint64_t index) const;
+   // Drops the pages of a file that is going away.
+   void forget(uint64_t file_id);
+ 
 diff --git a/src/query.cpp b/src/query.cpp
-index 6df3c68..609c73e 100644
+index 6df3c68..4d123f6 100644
 --- a/src/query.cpp
 +++ b/src/query.cpp
-@@ -318,7 +318,9 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
+@@ -15,6 +15,7 @@
+ #include <ranges>
+ #include <stdexcept>
+ #include <string_view>
++#include <utility>
+ #include <vector>
+ 
+ #include "blob_file.hpp"
+@@ -318,7 +319,9 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
    // same pair with the score stored as a double, which is what the Yomitan
    // schema's JSON number can hold (fractions, and magnitudes beyond int32).
    int version = 0;
@@ -974,7 +1116,7 @@ index 6df3c68..609c73e 100644
      version = 6;
    } else if (std::filesystem::is_regular_file(path / ".hoshidicts_5")) {
      version = 5;
-@@ -393,7 +395,8 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
+@@ -393,7 +396,8 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
      dict.data->media_index = memory::map_rd(path / "media.idx");
    }
  
@@ -984,7 +1126,7 @@ index 6df3c68..609c73e 100644
      std::ifstream f(path / "dict.zstd", std::ios::binary);
      const std::string blob(std::istreambuf_iterator<char>(f), {});
      dict.data->zstd_dict =
-@@ -614,6 +617,9 @@ RawTerms DictionaryQuery::query_raw(const std::string& expression, BlobPins& pin
+@@ -614,6 +618,9 @@ RawTerms DictionaryQuery::query_raw(const std::string& expression, BlobPins& pin
              }
            }
          }
@@ -994,7 +1136,7 @@ index 6df3c68..609c73e 100644
  
          double score = 0;
          if (data->version >= 5) {
-@@ -1196,3 +1202,240 @@ bool DictionaryQuery::hash_index_paged(const std::string& path) const {
+@@ -1196,3 +1203,317 @@ bool DictionaryQuery::hash_index_paged(const std::string& path) const {
    const auto* dict = find_loaded(path);
    return dict && dict->data->table.paged();
  }
@@ -1121,6 +1263,83 @@ index 6df3c68..609c73e 100644
 +    return glossary;
 +  }
 +  return std::nullopt;
++}
++
++namespace {
++// Enough of a term record for query_rows and query_glossary to read it whole,
++// or the fields before its glossary, for most records.
++constexpr size_t term_record_advice_bytes = 512;
++}  // namespace
++
++void DictionaryQuery::prefetch_rows(std::span<const std::string> keys) const {
++  // Only a hint, so a file that cannot be read is left to the query.
++  try {
++    // The index record of each key in each dictionary: a count, then the
++    // offsets of the term records.
++    std::vector<std::pair<const DictionaryData*, uint64_t>> indexes;
++    for (const auto& key : keys) {
++      for (const auto& dict : term_dicts_) {
++        const auto* data = dict.data.get();
++        if (data->version < 7 || !data->blobs.paged()) {
++          continue;
++        }
++        const uint64_t offset = data->table(key);
++        if (offset != 0) {
++          data->blobs.advise(offset, sizeof(uint32_t));
++          indexes.emplace_back(data, offset);
++        }
++      }
++    }
++    BlobPins pins;
++    std::vector<uint32_t> counts;
++    counts.reserve(indexes.size());
++    for (const auto& [data, offset] : indexes) {
++      BlobCursor index(data->blobs, offset, pins);
++      const auto count = read_value<uint32_t>(index);
++      counts.push_back(count);
++      data->blobs.advise(offset + sizeof(uint32_t), count * sizeof(uint64_t));
++    }
++    for (size_t i = 0; i < indexes.size(); i++) {
++      const auto& [data, offset] = indexes[i];
++      BlobCursor index(data->blobs, offset + sizeof(uint32_t), pins);
++      for (uint32_t j = 0; j < counts[i]; j++) {
++        data->blobs.advise(read_value<uint64_t>(index), term_record_advice_bytes);
++      }
++    }
++  } catch (const std::exception&) {
++  }
++}
++
++void DictionaryQuery::prefetch_glossaries(std::span<const std::tuple<std::string, uint64_t>> items) const {
++  try {
++    std::vector<std::pair<const DictionaryData*, uint64_t>> records;
++    for (const auto& [dict_name, offset] : items) {
++      for (const auto& dict : term_dicts_) {
++        if (dict.name != dict_name) {
++          continue;
++        }
++        const auto* data = dict.data.get();
++        if (data->blobs.paged() && offset < data->blobs.size()) {
++          data->blobs.advise(offset, term_record_advice_bytes);
++          records.emplace_back(data, offset);
++        }
++        break;
++      }
++    }
++    BlobPins pins;
++    for (const auto& [data, offset] : records) {
++      BlobCursor record(data->blobs, offset, pins);
++      if (read_value<uint8_t>(record) != 0) {
++        continue;
++      }
++      record.skip(read_value<uint16_t>(record));
++      record.skip(read_value<uint16_t>(record));
++      const auto glossary_offset = read_value<uint64_t>(record);
++      const auto glossary_size = read_value<uint32_t>(record);
++      data->blobs.advise(glossary_offset, glossary_size);
++    }
++  } catch (const std::exception&) {
++  }
 +}
 +
 +std::vector<MetaRow> DictionaryQuery::query_meta_rows(const std::string& key) const {

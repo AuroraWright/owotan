@@ -65,14 +65,16 @@ bool read(T& value, const char* json) {
   return !glz::read<glz::opts{.error_on_unknown_keys = false}>(value, std::string_view{json});
 }
 
-// Runs `get` for each key of the JSON array `keys_json`: [[result, ...], ...].
-template <typename Key, typename Get>
-const char* each_key(const char* keys_json, Get&& get) {
+// Runs `get` for each key of the JSON array `keys_json`: [[result, ...], ...],
+// after `prepare` with them all.
+template <typename Key, typename Get, typename Prepare = void (*)(const std::vector<Key>&)>
+const char* each_key(const char* keys_json, Get&& get, Prepare&& prepare = [](const std::vector<Key>&) {}) {
   std::vector<Key> keys;
   if (!read(keys, keys_json)) {
     return write_error("invalid request");
   }
   try {
+    prepare(keys);
     std::vector<decltype(get(keys.front()))> out;
     out.reserve(keys.size());
     for (const auto& key : keys) {
@@ -128,7 +130,9 @@ EMSCRIPTEN_KEEPALIVE void yh_remove(const char* path) { g_query.remove_dict(path
 
 // ["key", ...] -> [[TermRow, ...], ...], without glossaries.
 EMSCRIPTEN_KEEPALIVE const char* yh_find_terms(const char* keys_json) {
-  return each_key<std::string>(keys_json, [](const std::string& key) { return g_query.query_rows(key); });
+  return each_key<std::string>(
+      keys_json, [](const std::string& key) { return g_query.query_rows(key); },
+      [](const std::vector<std::string>& keys) { g_query.prefetch_rows(keys); });
 }
 
 // [["dictionary", sequence], ...] -> [[TermRow, ...], ...], without glossaries.
@@ -146,6 +150,7 @@ EMSCRIPTEN_KEEPALIVE const char* yh_glossaries(const char* items_json) {
     return write_error("invalid request");
   }
   try {
+    g_query.prefetch_glossaries(items);
     g_out.assign(1, '[');
     for (const auto& [dictionary, offset] : items) {
       if (g_out.size() > 1) {

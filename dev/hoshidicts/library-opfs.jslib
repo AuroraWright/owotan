@@ -30,6 +30,10 @@
 // are already in memory.
 //
 // FS.mount(OPFSFS, {files: [], newFiles: [{name, handle}]}, '/some/directory')
+//
+// A handle with an advise(offset, length) method is told of the ranges the
+// program will read soon, which it says with posix_fadvise(POSIX_FADV_WILLNEED),
+// so that it can read them together.
 
 addToLibrary({
     $OPFSFS__deps: ['$FS', '$mmapAlloc'],
@@ -190,5 +194,19 @@ addToLibrary({
                 return 0;
             },
         },
+    },
+    // In place of Emscripten's, which does nothing with the advice.
+    __syscall_fadvise64__deps: ['$SYSCALLS'],
+    __syscall_fadvise64__i53abi: true,
+    __syscall_fadvise64: (fd, offset, len, advice) => {
+        var stream = SYSCALLS.getStreamFromFD(fd);
+        if (!stream.seekable) {
+            return -{{{ cDefs.ESPIPE }}};
+        }
+        // POSIX_FADV_WILLNEED
+        if (advice === 3 && typeof stream.node.handle?.advise === 'function') {
+            stream.node.handle.advise(offset, len);
+        }
+        return 0;
     },
 });

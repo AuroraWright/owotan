@@ -134,6 +134,11 @@ const BLOCK_SIZE = 64 * 1024;
  */
 const MAX_CACHED_BLOCKS = 256;
 /**
+ * The most blocks read ahead at once, for the ranges handles are told of (`BlobReadHandle.advise`), which is less
+ * than the cache holds so that they do not push each other out of it.
+ */
+const MAX_ADVISED_BLOCKS = MAX_CACHED_BLOCKS / 2;
+/**
  * The most that one `FileReaderSync` read reads, so a large read does not make a copy of its size.
  */
 const MAX_READ_SIZE = 8 * 1024 * 1024;
@@ -145,8 +150,9 @@ const MAX_READ_SIZE = 8 * 1024 * 1024;
  *
  * Each read through `FileReaderSync` costs about a millisecond and a half in Safari however little it reads, and
  * opening a dictionary makes dozens of reads of a few bytes, so small reads go through a cache of blocks. The
- * Blobs of stored files never change, so the blocks never go stale. A handle can also be given the whole content
- * of its Blob, read with others by `readBlobs`, to read from until it is released.
+ * Blobs of stored files never change, so the blocks never go stale. hoshidicts also says which ranges it will
+ * read next (`advise`), and the blocks of those of all handles are read together. A handle can also be given the
+ * whole content of its Blob, read with others by `readBlobs`, to read from until it is released.
  */
 export class BlobReadHandle {
     /**
@@ -205,6 +211,21 @@ export class BlobReadHandle {
     }
 
     /**
+     * Notes that a range will be read soon. Its blocks that are not cached are read together with those of the
+     * other ranges noted, of any handle, when a block that is not cached is next read.
+     * @param {number} offset
+     * @param {number} length
+     */
+    advise(offset, length) {
+        if (this._content !== null) { return; }
+        const end = Math.min(offset + length, this._blob.size);
+        for (let start = offset - (offset % BLOCK_SIZE); start < end && advisedBlocks.size < MAX_ADVISED_BLOCKS; start += BLOCK_SIZE) {
+            const key = `${this._id}:${start}`;
+            if (!cachedBlocks.has(key)) { advisedBlocks.set(key, this._getBlockBlob(start)); }
+        }
+    }
+
+    /**
      * Drops the content the handle was given, so that later reads read the Blob.
      */
     release() {
@@ -231,15 +252,56 @@ export class BlobReadHandle {
         if (typeof block !== 'undefined') {
             // Moved to the end, as the most recently used
             cachedBlocks.delete(key);
-        } else {
-            block = new Uint8Array(this._getReader().readAsArrayBuffer(this._blob.slice(start, Math.min(start + BLOCK_SIZE, this._blob.size))));
-            if (cachedBlocks.size >= MAX_CACHED_BLOCKS) {
-                cachedBlocks.delete(/** @type {string} */ (cachedBlocks.keys().next().value));
-            }
+            cachedBlocks.set(key, block);
+            return block;
         }
-        cachedBlocks.set(key, block);
+        if (advisedBlocks.size > 0) {
+            advisedBlocks.set(key, this._getBlockBlob(start));
+            try {
+                readAdvisedBlocks();
+            } catch (e) {
+                // Read on its own
+            }
+            block = cachedBlocks.get(key);
+            if (typeof block !== 'undefined') { return block; }
+        }
+        block = new Uint8Array(this._getReader().readAsArrayBuffer(this._getBlockBlob(start)));
+        cacheBlock(key, block);
         return block;
     }
+
+    /**
+     * @param {number} start
+     * @returns {Blob}
+     */
+    _getBlockBlob(start) {
+        return this._blob.slice(start, Math.min(start + BLOCK_SIZE, this._blob.size));
+    }
+}
+
+/**
+ * Reads the blocks of the ranges handles were told of in one read (`BlobReadHandle.advise`), and caches them.
+ */
+function readAdvisedBlocks() {
+    const keys = [...advisedBlocks.keys()];
+    const blobs = [...advisedBlocks.values()];
+    advisedBlocks.clear();
+    const contents = readBlobs(blobs);
+    for (let i = 0; i < keys.length; ++i) {
+        // A copy, so that the buffer of all of them is not kept while one is cached
+        cacheBlock(keys[i], new Uint8Array(contents[i]));
+    }
+}
+
+/**
+ * @param {string} key
+ * @param {Uint8Array} block
+ */
+function cacheBlock(key, block) {
+    if (cachedBlocks.size >= MAX_CACHED_BLOCKS) {
+        cachedBlocks.delete(/** @type {string} */ (cachedBlocks.keys().next().value));
+    }
+    cachedBlocks.set(key, block);
 }
 
 /**
@@ -284,3 +346,8 @@ let nextHandleId = 0;
  * @type {Map<string, Uint8Array>}
  */
 const cachedBlocks = new Map();
+/**
+ * The blocks of the ranges handles were told of that are not cached, by handle and position.
+ * @type {Map<string, Blob>}
+ */
+const advisedBlocks = new Map();
