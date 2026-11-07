@@ -71,7 +71,8 @@
     --progress-bar-height-no-units: 4;
     --progress-bar-height: calc(1em * (var(--progress-bar-height-no-units) / var(--font-size-no-units)));
     --progress-bar-active-transition-duration: 0.125s;
-    --progress-bar-active-transition-start-delay: 0.0625s;
+    /* Waits shorter than this, such as for audio a source does not have, show no progress bar */
+    --progress-bar-active-transition-start-delay: 0.5s;
     --progress-bar-animation-duration: 2s;
 
     --entry-current-indicator-width-no-units: 4;
