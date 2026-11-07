@@ -33,7 +33,7 @@ export type ImportDictionaryMessage = {
 
 export type ImportDictionaryMessageParams = {
     details: DictionaryImporter.ImportDetails;
-    archiveContent: ArrayBuffer;
+    archiveContent: ArrayBuffer | Blob;
 };
 
 export type GetDictionaryCountsMessage = {

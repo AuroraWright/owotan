@@ -18,6 +18,7 @@
 
 import * as ajvSchemas0 from '../../lib/validate-schemas.js';
 import {
+    BlobReader as BlobReader0,
     BlobWriter as BlobWriter0,
     TextWriter as TextWriter0,
     Uint8ArrayReader as Uint8ArrayReader0,
@@ -26,11 +27,13 @@ import {
 } from '../../lib/zip.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {parseJson} from '../core/json.js';
+import {BlobReadHandle} from '../data/blob-file-store.js';
 import {getImageMediaTypeFromFileName} from '../media/media-util.js';
 import {compareRevisions} from './dictionary-data-util.js';
 import {Hoshidicts, isCrossOriginIsolated} from './hoshidicts.js';
 
 const ajvSchemas = /** @type {import('dictionary-importer').CompiledSchemaValidators} */ (/** @type {unknown} */ (ajvSchemas0));
+const BlobReader = /** @type {typeof import('@zip.js/zip.js').BlobReader} */ (/** @type {unknown} */ (BlobReader0));
 const BlobWriter = /** @type {typeof import('@zip.js/zip.js').BlobWriter} */ (/** @type {unknown} */ (BlobWriter0));
 const TextWriter = /** @type {typeof import('@zip.js/zip.js').TextWriter} */ (/** @type {unknown} */ (TextWriter0));
 const Uint8ArrayReader = /** @type {typeof import('@zip.js/zip.js').Uint8ArrayReader} */ (/** @type {unknown} */ (Uint8ArrayReader0));
@@ -57,7 +60,8 @@ export class DictionaryImporter {
     /**
      * Validates a dictionary archive, has hoshidicts import it and stores the result.
      * @param {import('./dictionary-database.js').DictionaryDatabase} dictionaryDatabase
-     * @param {ArrayBuffer} archiveContent
+     * @param {ArrayBuffer|Blob} archiveContent A Blob, such as a file the user picked, is read as it is needed, so a large
+     *   archive is never held in memory whole.
      * @param {import('dictionary-importer').ImportDetails} details
      * @returns {Promise<import('dictionary-importer').ImportResult>}
      */
@@ -142,7 +146,7 @@ export class DictionaryImporter {
      * Has hoshidicts import the archive into the database's storage. hoshidicts parses the banks, failing for a
      * bank that does not hold the rows its name promises; their contents are not checked further.
      * @param {import('./dictionary-database.js').DictionaryDatabase} dictionaryDatabase
-     * @param {ArrayBuffer} archiveContent
+     * @param {ArrayBuffer|Blob} archiveContent
      * @param {(report: import('hoshidicts').ImportReport) => Promise<import('dictionary-database').DictionaryRecord>} createRecord
      * @returns {Promise<import('dictionary-database').DictionaryRecord>}
      * @throws {Error}
@@ -153,8 +157,9 @@ export class DictionaryImporter {
         const hoshidicts = await Hoshidicts.create(isCrossOriginIsolated() ? Math.min(navigator.hardwareConcurrency || 1, 8) : null);
         const {fs} = hoshidicts;
         // hoshidicts reads the archive where it already is, rather than from a copy in its file system.
+        const handle = archiveContent instanceof Blob ? new BlobReadHandle(archiveContent) : createMemoryFile(new Uint8Array(archiveContent));
         fs.mkdir('/archive');
-        fs.mount(hoshidicts.opfsFileSystem, {files: [{name: 'archive.zip', handle: createMemoryFile(new Uint8Array(archiveContent))}]}, '/archive');
+        fs.mount(hoshidicts.opfsFileSystem, {files: [{name: 'archive.zip', handle}]}, '/archive');
         return await dictionaryDatabase.addDictionary(hoshidicts, '/import', async () => {
             const report = hoshidicts.import('/archive/archive.zip', '/import');
             const {success, error} = report;
@@ -166,11 +171,11 @@ export class DictionaryImporter {
     }
 
     /**
-     * @param {ArrayBuffer} archiveContent
+     * @param {ArrayBuffer|Blob} archiveContent
      * @returns {Promise<import('dictionary-importer').ArchiveFileMap>}
      */
     async _getFilesFromArchive(archiveContent) {
-        const zipFileReader = new Uint8ArrayReader(new Uint8Array(archiveContent));
+        const zipFileReader = archiveContent instanceof Blob ? new BlobReader(archiveContent) : new Uint8ArrayReader(new Uint8Array(archiveContent));
         const zipReader = new ZipReader(zipFileReader);
         const zipEntries = await zipReader.getEntries();
         /** @type {import('dictionary-importer').ArchiveFileMap} */

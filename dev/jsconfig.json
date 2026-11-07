@@ -21,6 +21,9 @@
             "anki-templates-internal": [
                 "../types/ext/anki-templates-internal"
             ],
+            "blob-file-store": [
+                "../types/ext/blob-file-store"
+            ],
             "cache-map": [
                 "../types/ext/cache-map"
             ],

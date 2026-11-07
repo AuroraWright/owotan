@@ -103,9 +103,26 @@ export class BlobFileStore {
 }
 
 /**
+ * Reads smaller than this are served from blocks of this size, which are read whole and cached.
+ */
+const BLOCK_SIZE = 64 * 1024;
+/**
+ * How many blocks are cached, across all handles.
+ */
+const MAX_CACHED_BLOCKS = 256;
+/**
+ * The most that one `FileReaderSync` read reads, so a large read does not make a copy of its size.
+ */
+const MAX_READ_SIZE = 8 * 1024 * 1024;
+
+/**
  * Reads a Blob in place of an origin private file system sync access handle, for the file systems of hoshidicts
  * and MeCab (dev/hoshidicts/library-opfs.jslib), which read only the parts of a file they need. Reads are
  * synchronous, so this only works in a worker.
+ *
+ * Each read through `FileReaderSync` costs about a millisecond and a half in Safari however little it reads, and
+ * opening a dictionary makes dozens of reads of a few bytes, so small reads go through a cache of blocks. The
+ * Blobs of stored files never change, so the blocks never go stale.
  */
 export class BlobReadHandle {
     /**
@@ -116,6 +133,8 @@ export class BlobReadHandle {
         this._blob = blob;
         /** @type {FileReaderSync} */
         this._reader = new FileReaderSync();
+        /** @type {number} */
+        this._id = nextHandleId++;
     }
 
     /**
@@ -133,8 +152,54 @@ export class BlobReadHandle {
     read(buffer, {at}) {
         const end = Math.min(at + buffer.byteLength, this._blob.size);
         if (end <= at) { return 0; }
-        const content = new Uint8Array(this._reader.readAsArrayBuffer(this._blob.slice(at, end)));
-        buffer.set(content);
-        return content.byteLength;
+        let position = at;
+        if (end - at >= BLOCK_SIZE) {
+            // In parts, as each read makes a copy, and hoshidicts reads a whole archive at once.
+            while (position < end) {
+                const content = new Uint8Array(this._reader.readAsArrayBuffer(this._blob.slice(position, Math.min(position + MAX_READ_SIZE, end))));
+                if (content.byteLength === 0) { break; }
+                buffer.set(content, position - at);
+                position += content.byteLength;
+            }
+            return position - at;
+        }
+        while (position < end) {
+            const blockStart = position - (position % BLOCK_SIZE);
+            const block = this._getBlock(blockStart);
+            const count = Math.min(end, blockStart + block.byteLength) - position;
+            buffer.set(block.subarray(position - blockStart, position - blockStart + count), position - at);
+            position += count;
+        }
+        return end - at;
+    }
+
+    // Private
+
+    /**
+     * @param {number} start
+     * @returns {Uint8Array}
+     */
+    _getBlock(start) {
+        const key = `${this._id}:${start}`;
+        let block = cachedBlocks.get(key);
+        if (typeof block !== 'undefined') {
+            // Moved to the end, as the most recently used
+            cachedBlocks.delete(key);
+        } else {
+            block = new Uint8Array(this._reader.readAsArrayBuffer(this._blob.slice(start, Math.min(start + BLOCK_SIZE, this._blob.size))));
+            if (cachedBlocks.size >= MAX_CACHED_BLOCKS) {
+                cachedBlocks.delete(/** @type {string} */ (cachedBlocks.keys().next().value));
+            }
+        }
+        cachedBlocks.set(key, block);
+        return block;
     }
 }
+
+/** @type {number} */
+let nextHandleId = 0;
+/**
+ * The blocks `BlobReadHandle` read, by handle and position, from the least recently used.
+ * @type {Map<string, Uint8Array>}
+ */
+const cachedBlocks = new Map();

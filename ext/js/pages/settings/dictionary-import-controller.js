@@ -621,8 +621,9 @@ export class DictionaryImportController {
      * @returns {Promise<Error[] | undefined>}
      */
     async _importDictionaryFromZip(file, profilesDictionarySettings, importDetails, onProgress) {
-        const archiveContent = await this._readFile(file);
-        const {result, errors} = await new DictionaryWorker().importDictionary(archiveContent, importDetails, onProgress);
+        // The worker reads the file as it needs it rather than all at once: the largest dictionaries take hundreds of
+        // megabytes, and Safari on iOS reloads a page that uses too much memory.
+        const {result, errors} = await new DictionaryWorker().importDictionary(file, importDetails, onProgress);
         if (!result) {
             return errors;
         }
@@ -777,19 +778,6 @@ export class DictionaryImportController {
         const errorContainer = /** @type {HTMLElement} */ (this._errorContainer);
         errorContainer.textContent = '';
         errorContainer.hidden = true;
-    }
-
-    /**
-     * @param {File} file
-     * @returns {Promise<ArrayBuffer>}
-     */
-    _readFile(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(/** @type {ArrayBuffer} */ (reader.result));
-            reader.onerror = () => reject(reader.error);
-            reader.readAsArrayBuffer(file);
-        });
     }
 
     /**

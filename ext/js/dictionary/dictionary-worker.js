@@ -26,7 +26,8 @@ export class DictionaryWorker {
     }
 
     /**
-     * @param {ArrayBuffer} archiveContent
+     * @param {ArrayBuffer|Blob} archiveContent A Blob, such as a file the user picked, is read as the import needs it,
+     *   so a large archive is never held in memory whole.
      * @param {import('dictionary-importer').ImportDetails} details
      * @param {?import('dictionary-worker').ImportProgressCallback} onProgress
      * @returns {Promise<import('dictionary-importer').ImportResult>}
@@ -35,7 +36,7 @@ export class DictionaryWorker {
         return this._invoke(
             'importDictionary',
             {details, archiveContent},
-            [archiveContent],
+            archiveContent instanceof ArrayBuffer ? [archiveContent] : [],
             onProgress,
             this._formatImportDictionaryResult.bind(this),
         );
