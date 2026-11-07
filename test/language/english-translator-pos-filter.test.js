@@ -38,7 +38,7 @@ async function findTermsBulk(termList) {
             termTags: [],
             rules: ['v'],
             definitions: [],
-            deferredDefinitionCount: 1,
+            hasDeferredDefinitions: true,
             score: 1,
             dictionary,
             id: 1,

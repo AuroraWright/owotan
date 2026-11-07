@@ -29,7 +29,7 @@ import {fileURLToPath} from 'url';
 import {checkOutCommit, run} from '../emscripten-build.js';
 
 const repository = 'https://github.com/bee-san/hoshidicts';
-const commit = 'e5751e88328969b2e0217a0caa0eebc36b6e4089';
+const commit = '7efb66c63b04fbaa36ee93b8bded4e4394e732e6';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectDirectory = path.join(dirname, '..', 'hoshidicts');

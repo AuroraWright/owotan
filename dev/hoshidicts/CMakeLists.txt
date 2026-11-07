@@ -33,9 +33,14 @@ add_compile_options(${compile_flags})
 # only passes through the flags.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D'XXH_HAS_INCLUDE(x)=0'")
 
+# The import and the record fields Yomitan's database needs, and the access to
+# the dictionaries' files that rows.cpp reads them through.
+set(HOSHIDICTS_YOMITAN ON)
 add_subdirectory(${HOSHIDICTS_SOURCE_DIR} hoshidicts EXCLUDE_FROM_ALL)
 
-add_executable(hoshidicts_wasm bindings.cpp)
+add_executable(hoshidicts_wasm bindings.cpp image_size.cpp rows.cpp)
+# rows.cpp reads records through hoshidicts' own headers.
+target_include_directories(hoshidicts_wasm PRIVATE ${HOSHIDICTS_SOURCE_DIR}/src)
 target_link_libraries(hoshidicts_wasm PRIVATE hoshidicts glaze::glaze)
 set_target_properties(hoshidicts_wasm PROPERTIES OUTPUT_NAME ${output_name} SUFFIX ".js")
 set_property(TARGET hoshidicts_wasm APPEND PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/library-opfs.jslib)

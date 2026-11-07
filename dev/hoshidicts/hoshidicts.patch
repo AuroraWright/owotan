@@ -1,33 +1,48 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index f01d096..2c151b1 100644
+index 2ccf83c..c1adb00 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -80,6 +80,7 @@ add_library(hoshidicts
-     src/hash/hash.cpp
-     src/hash/bloom.cpp
-     src/importer.cpp
-+    src/image_size.cpp
-     src/memory/memory.cpp
-     src/memory/page_cache.cpp
-     src/blob_file.cpp
+@@ -16,6 +16,12 @@ option(HOSHIDICTS_TESTS "hoshidicts unit tests (ctest)" OFF)
+ # from a Blob there, so dictionary files are opened read-write for the copy
+ # (see src/memory/memory.cpp).
+ option(HOSHIDICTS_WASMFS "The Emscripten build links against WasmFS" OFF)
++# Yomitan's host (its Safari and Chromium builds): the importer validates banks
++# as Yomitan's schema did, lists the images glossaries show, and keeps more of a
++# term in its record (its form-of references, whether it has definitions Yomitan
++# shows, and its sequence); QueryAccess gives the host the dictionaries' files,
++# whose records it reads itself.
++option(HOSHIDICTS_YOMITAN "The importer and query API of Yomitan's host" OFF)
+ option(HOSHIDICTS_DEINFLECTOR_TESTS "Japanese conjugation parity tests" OFF)
+ option(HOSHIDICTS_LANGUAGE_TESTS "language pack conformance tests (docs/languages.md 12.1)" OFF)
+ 
+@@ -118,6 +124,11 @@ if(HOSHIDICTS_WASMFS)
+   target_compile_definitions(hoshidicts PRIVATE HOSHIDICTS_WASMFS=1)
+ endif()
+ 
++if(HOSHIDICTS_YOMITAN)
++  # Public: the headers declare the API it adds.
++  target_compile_definitions(hoshidicts PUBLIC HOSHIDICTS_YOMITAN=1)
++endif()
++
+ # Language packs are parsed once per pack (docs/languages.md 13), so the
+ # WebAssembly build optimises the load-time sources, and the code they
+ # instantiate, for size: they are most of what the framework adds to a bundle.
 diff --git a/include/hoshidicts/importer.hpp b/include/hoshidicts/importer.hpp
-index c61d2f7..7583ba5 100644
+index c61d2f7..6112f5e 100644
 --- a/include/hoshidicts/importer.hpp
 +++ b/include/hoshidicts/importer.hpp
 @@ -71,12 +71,25 @@ struct ImportWarnings {
    size_t unreadableResources = 0;
  };
  
++#ifdef HOSHIDICTS_YOMITAN
 +// An image a glossary shows, with the first term row that shows it.
 +struct ImportImage {
 +  std::string path;
 +  std::string expression;
 +  std::string reading;
-+  // The size its header gives, or 0 when the header does not settle it (see
-+  // image_size::read) or the archive does not hold the image.
-+  uint32_t width = 0;
-+  uint32_t height = 0;
 +};
++#endif
 +
  struct ImportResult {
    bool success = false;
@@ -35,118 +50,13 @@ index c61d2f7..7583ba5 100644
    Summary summary;
    std::string error;
    ImportWarnings warnings;
++#ifdef HOSHIDICTS_YOMITAN
 +  // Each image the term glossaries show, once, in the order the banks first show it.
 +  std::vector<ImportImage> images;
++#endif
  };
  
  namespace dictionary_importer {
-diff --git a/include/hoshidicts/query.hpp b/include/hoshidicts/query.hpp
-index dba519f..0f8cae9 100644
---- a/include/hoshidicts/query.hpp
-+++ b/include/hoshidicts/query.hpp
-@@ -1,11 +1,14 @@
- #pragma once
- 
- #include <cstdint>
-+#include <initializer_list>
-+#include <map>
- #include <memory>
- #include <optional>
- #include <span>
- #include <string>
- #include <string_view>
-+#include <tuple>
- #include <unordered_map>
- #include <vector>
- 
-@@ -94,6 +97,49 @@ struct KanjiResult {
-   std::vector<FrequencyEntry> frequencies;
- };
- 
-+struct TermRedirect {
-+  std::string form_of;
-+  std::vector<std::string> rules;
-+};
-+
-+// One term-bank row, without its glossary, which query_glossary reads. `offset`
-+// identifies the row within its dictionary.
-+struct TermRow {
-+  std::string dict_name;
-+  std::string expression;
-+  std::string reading;
-+  std::string definition_tags;
-+  std::string rules;
-+  std::string term_tags;
-+  double score = 0;
-+  std::vector<TermRedirect> redirects;
-+  // The glossary's items other than redirects.
-+  int32_t content_count = 0;
-+  // The row's sequence; -1 when it has none.
-+  int64_t sequence = -1;
-+  uint64_t offset = 0;
-+  bool reading_match = false;
-+};
-+
-+// One kanji_bank row.
-+struct KanjiRow {
-+  std::string dict_name;
-+  std::string character;
-+  std::string onyomi;
-+  std::string kunyomi;
-+  std::string tags;
-+  std::vector<std::string> meanings;
-+  std::map<std::string, std::string> stats;
-+};
-+
-+// One term_meta_bank or kanji_meta_bank row with its data left as JSON.
-+struct MetaRow {
-+  std::string dict_name;
-+  std::string expression;
-+  std::string mode;
-+  std::string data;
-+};
-+
- struct RawTerm;
- struct RawTerms;
- struct BlobPins;
-@@ -190,6 +236,26 @@ class DictionaryQuery {
-   KanjiResult query_kanji(const std::string& kanji, std::span<const std::string> dictionaries) const;
- 
-   std::vector<TermResult> query(const std::string& expression) const;
-+  // The rows of term dictionaries of version 7 or later, which hold all that a
-+  // row has, whose expression or reading is `key`.
-+  std::vector<TermRow> query_rows(const std::string& key) const;
-+  std::optional<std::string> query_glossary(const std::string& dict_name, uint64_t offset) const;
-+  // Tell the paged files of the dictionaries what query_rows,
-+  // query_meta_rows, query_kanji_rows and query_kanji_meta_rows of each of
-+  // `keys` will read, and query_glossary of each item, a level of records at
-+  // a time, as each level is found in the one before it: the hash table slots,
-+  // the index records, then the records. A file system that reads in batches
-+  // can then read each level at once, rather than record by record.
-+  void prefetch_rows(std::span<const std::string> keys) const;
-+  void prefetch_meta_rows(std::span<const std::string> keys) const;
-+  void prefetch_kanji_rows(std::span<const std::string> characters) const;
-+  void prefetch_kanji_meta_rows(std::span<const std::string> characters) const;
-+  void prefetch_glossaries(std::span<const std::tuple<std::string, uint64_t>> items) const;
-+  // The rows a sequenced term dictionary of version 7 or later files under `sequence`.
-+  std::vector<TermRow> query_sequence_rows(const std::string& dict_name, int64_t sequence) const;
-+  std::vector<MetaRow> query_meta_rows(const std::string& key) const;
-+  std::vector<KanjiRow> query_kanji_rows(const std::string& character) const;
-+  std::vector<MetaRow> query_kanji_meta_rows(const std::string& character) const;
- 
-   std::vector<char> get_media_file(const std::string& dict_name, const std::string& media_path) const;
-   // A view into the mapped media.bin; empty when the file is missing and when
-@@ -221,6 +287,10 @@ class DictionaryQuery {
-   struct DictionaryData;
-   struct Dictionary;
- 
-+  // What prefetch_rows and the like advise, for the dictionaries of `lists`.
-+  void prefetch_records(std::initializer_list<const std::vector<Dictionary>*> lists,
-+                        std::span<const std::string> keys) const;
-+
-   // The dictionaries a request uses (docs/languages.md, section 9.7): every
-   // loaded one in load order, or exactly those a request's list names, in
-   // its order. `term_path` (lookup_dictionary) further restricts term
 diff --git a/src/blob_file.cpp b/src/blob_file.cpp
 index d72fbba..253ac28 100644
 --- a/src/blob_file.cpp
@@ -242,378 +152,47 @@ index 65c40e1..1e6289a 100644
  
    void build_to_file(const std::vector<std::pair<uint64_t, uint64_t>>& hash_entries, const std::filesystem::path& path);
    bool load(BlobFile file);
-diff --git a/src/image_size.cpp b/src/image_size.cpp
-new file mode 100644
-index 0000000..5c255c6
---- /dev/null
-+++ b/src/image_size.cpp
-@@ -0,0 +1,314 @@
-+#include "image_size.hpp"
-+
-+#include <algorithm>
-+#include <cstddef>
-+#include <cstdint>
-+#include <optional>
-+#include <string_view>
-+#include <vector>
-+
-+namespace {
-+uint32_t byte(std::string_view data, size_t at) { return static_cast<uint8_t>(data[at]); }
-+
-+uint32_t be16(std::string_view data, size_t at) { return (byte(data, at) << 8) | byte(data, at + 1); }
-+
-+uint32_t be32(std::string_view data, size_t at) { return (be16(data, at) << 16) | be16(data, at + 2); }
-+
-+uint32_t le16(std::string_view data, size_t at) { return byte(data, at) | (byte(data, at + 1) << 8); }
-+
-+uint32_t le24(std::string_view data, size_t at) { return le16(data, at) | (byte(data, at + 2) << 16); }
-+
-+uint32_t le32(std::string_view data, size_t at) { return le16(data, at) | (le16(data, at + 2) << 16); }
-+
-+std::optional<ImageSize> sized(uint32_t width, uint32_t height) {
-+  if (width == 0 || height == 0) {
-+    return std::nullopt;
-+  }
-+  return ImageSize{width, height};
-+}
-+
-+std::optional<ImageSize> read_png(std::string_view data) {
-+  // The IHDR chunk comes first. An eXIf chunk before the image data may rotate it.
-+  if (data.size() < 24 || data.substr(12, 4) != "IHDR") {
-+    return std::nullopt;
-+  }
-+  const uint32_t width = be32(data, 16);
-+  const uint32_t height = be32(data, 20);
-+  for (size_t at = 8; at + 8 <= data.size();) {
-+    const std::string_view type = data.substr(at + 4, 4);
-+    if (type == "eXIf") {
-+      return std::nullopt;
-+    }
-+    if (type == "IDAT") {
-+      break;
-+    }
-+    at += 12 + static_cast<size_t>(be32(data, at));
-+  }
-+  return sized(width, height);
-+}
-+
-+std::optional<ImageSize> read_gif(std::string_view data) {
-+  if (data.size() < 10) {
-+    return std::nullopt;
-+  }
-+  return sized(le16(data, 6), le16(data, 8));
-+}
-+
-+// The orientation that an Exif block's TIFF data records in its first image
-+// file directory (tag 0x0112), 1 when it records none; empty when the data
-+// does not parse.
-+std::optional<uint32_t> read_exif_orientation(std::string_view tiff) {
-+  if (tiff.size() < 8) {
-+    return std::nullopt;
-+  }
-+  bool little = false;
-+  if (tiff.starts_with("II")) {
-+    little = true;
-+  } else if (!tiff.starts_with("MM")) {
-+    return std::nullopt;
-+  }
-+  const auto u16 = [&](size_t at) { return little ? le16(tiff, at) : be16(tiff, at); };
-+  const auto u32 = [&](size_t at) { return little ? le32(tiff, at) : be32(tiff, at); };
-+  if (u16(2) != 42) {
-+    return std::nullopt;
-+  }
-+  const size_t directory = u32(4);
-+  if (directory > tiff.size() || tiff.size() - directory < 2) {
-+    return std::nullopt;
-+  }
-+  const size_t count = u16(directory);
-+  for (size_t i = 0; i < count; ++i) {
-+    const size_t entry = directory + 2 + 12 * i;
-+    if (entry > tiff.size() || tiff.size() - entry < 12) {
-+      return std::nullopt;
-+    }
-+    if (u16(entry) == 0x0112) {
-+      // A SHORT, which is in the first two bytes of the value field.
-+      return u16(entry + 8);
-+    }
-+  }
-+  return 1;
-+}
-+
-+std::optional<ImageSize> read_jpeg(std::string_view data) {
-+  // Orientations 5 to 8 turn the image a quarter, which browsers apply.
-+  bool turned = false;
-+  for (size_t at = 2; at + 4 <= data.size();) {
-+    if (byte(data, at) != 0xFF) {
-+      return std::nullopt;
-+    }
-+    const uint32_t marker = byte(data, at + 1);
-+    if (marker == 0xFF) {
-+      ++at;
-+      continue;
-+    }
-+    if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD8)) {
-+      at += 2;
-+      continue;
-+    }
-+    const size_t length = be16(data, at + 2);
-+    if (length < 2) {
-+      return std::nullopt;
-+    }
-+    if (marker == 0xE1 && data.substr(at + 4, 6) == std::string_view("Exif\0\0", 6)) {
-+      // The block's length counts its own two bytes and the six of "Exif\0\0".
-+      if (length < 8 || at + 2 + length > data.size()) {
-+        return std::nullopt;
-+      }
-+      const auto orientation = read_exif_orientation(data.substr(at + 10, length - 8));
-+      if (!orientation || *orientation < 1 || *orientation > 8) {
-+        return std::nullopt;
-+      }
-+      turned = *orientation >= 5;
-+    }
-+    const bool frame = marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC;
-+    if (frame) {
-+      if (at + 9 > data.size()) {
-+        return std::nullopt;
-+      }
-+      return turned ? sized(be16(data, at + 5), be16(data, at + 7)) : sized(be16(data, at + 7), be16(data, at + 5));
-+    }
-+    at += 2 + length;
-+  }
-+  return std::nullopt;
-+}
-+
-+std::optional<ImageSize> read_webp(std::string_view data) {
-+  if (data.size() < 30 || data.substr(8, 4) != "WEBP") {
-+    return std::nullopt;
-+  }
-+  const std::string_view chunk = data.substr(12, 4);
-+  if (chunk == "VP8 ") {
-+    if (byte(data, 23) != 0x9D || byte(data, 24) != 0x01 || byte(data, 25) != 0x2A) {
-+      return std::nullopt;
-+    }
-+    return sized(le16(data, 26) & 0x3FFF, le16(data, 28) & 0x3FFF);
-+  }
-+  if (chunk == "VP8L") {
-+    if (byte(data, 20) != 0x2F) {
-+      return std::nullopt;
-+    }
-+    const uint32_t bits = le32(data, 21);
-+    return sized((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1);
-+  }
-+  if (chunk == "VP8X") {
-+    constexpr uint32_t exif_flag = 0x08;
-+    if ((byte(data, 20) & exif_flag) != 0) {
-+      return std::nullopt;
-+    }
-+    return sized(le24(data, 24) + 1, le24(data, 27) + 1);
-+  }
-+  return std::nullopt;
-+}
-+
-+std::optional<ImageSize> read_bmp(std::string_view data) {
-+  if (data.size() < 26) {
-+    return std::nullopt;
-+  }
-+  if (le32(data, 14) == 12) {
-+    return sized(le16(data, 18), le16(data, 20));
-+  }
-+  const auto height = static_cast<int32_t>(le32(data, 22));
-+  return sized(le32(data, 18), static_cast<uint32_t>(height < 0 ? -static_cast<int64_t>(height) : height));
-+}
-+
-+// An ISOBMFF box: its type and contents.
-+struct Box {
-+  std::string_view type;
-+  std::string_view body;
-+};
-+
-+std::vector<Box> read_boxes(std::string_view data) {
-+  std::vector<Box> boxes;
-+  for (size_t at = 0; at + 8 <= data.size();) {
-+    uint64_t size = be32(data, at);
-+    size_t header = 8;
-+    if (size == 1) {
-+      if (at + 16 > data.size()) {
-+        break;
-+      }
-+      size = (static_cast<uint64_t>(be32(data, at + 8)) << 32) | be32(data, at + 12);
-+      header = 16;
-+    } else if (size == 0) {
-+      size = data.size() - at;
-+    }
-+    if (size < header || size > data.size() - at) {
-+      break;
-+    }
-+    boxes.push_back({data.substr(at + 4, 4), data.substr(at + header, static_cast<size_t>(size) - header)});
-+    at += static_cast<size_t>(size);
-+  }
-+  return boxes;
-+}
-+
-+const Box* find_box(const std::vector<Box>& boxes, std::string_view type) {
-+  for (const auto& box : boxes) {
-+    if (box.type == type) {
-+      return &box;
-+    }
-+  }
-+  return nullptr;
-+}
-+
-+// The primary item's ispe, the image's size, unless another of its properties
-+// changes the shown size.
-+std::optional<ImageSize> read_avif(std::string_view data) {
-+  const auto top = read_boxes(data);
-+  const Box* meta = find_box(top, "meta");
-+  if (meta == nullptr || meta->body.size() < 4) {
-+    return std::nullopt;
-+  }
-+  const auto meta_boxes = read_boxes(meta->body.substr(4));
-+  const Box* pitm = find_box(meta_boxes, "pitm");
-+  const Box* iprp = find_box(meta_boxes, "iprp");
-+  if (pitm == nullptr || iprp == nullptr || pitm->body.size() < 6) {
-+    return std::nullopt;
-+  }
-+  const bool wide_item = byte(pitm->body, 0) != 0;
-+  if (wide_item && pitm->body.size() < 8) {
-+    return std::nullopt;
-+  }
-+  const uint32_t primary = wide_item ? be32(pitm->body, 4) : be16(pitm->body, 4);
-+  const auto iprp_boxes = read_boxes(iprp->body);
-+  const Box* ipco = find_box(iprp_boxes, "ipco");
-+  if (ipco == nullptr) {
-+    return std::nullopt;
-+  }
-+  const auto properties = read_boxes(ipco->body);
-+
-+  std::optional<ImageSize> size;
-+  bool rotated = false;
-+  for (const auto& ipma : iprp_boxes) {
-+    if (ipma.type != "ipma" || ipma.body.size() < 8) {
-+      continue;
-+    }
-+    const std::string_view body = ipma.body;
-+    const uint32_t version = byte(body, 0);
-+    const bool wide_index = (byte(body, 3) & 1) != 0;
-+    const uint32_t count = be32(body, 4);
-+    size_t at = 8;
-+    for (uint32_t i = 0; i < count; ++i) {
-+      if (at + (version < 1 ? 3 : 5) > body.size()) {
-+        return std::nullopt;
-+      }
-+      const uint32_t item = version < 1 ? be16(body, at) : be32(body, at);
-+      at += version < 1 ? 2 : 4;
-+      const uint32_t associations = byte(body, at++);
-+      for (uint32_t j = 0; j < associations; ++j) {
-+        if (at + (wide_index ? 2 : 1) > body.size()) {
-+          return std::nullopt;
-+        }
-+        const uint32_t index = wide_index ? (be16(body, at) & 0x7FFF) : (byte(body, at) & 0x7F);
-+        at += wide_index ? 2 : 1;
-+        if (item != primary || index == 0 || index > properties.size()) {
-+          continue;
-+        }
-+        const Box& property = properties[index - 1];
-+        if (property.type == "ispe" && property.body.size() >= 12) {
-+          size = sized(be32(property.body, 4), be32(property.body, 8));
-+        } else if (property.type == "irot" && !property.body.empty()) {
-+          rotated = (byte(property.body, 0) & 1) != 0;
-+        } else if (property.type == "clap") {
-+          return std::nullopt;
-+        } else if (property.type == "pasp" && property.body.size() >= 8 &&
-+                   be32(property.body, 0) != be32(property.body, 4)) {
-+          return std::nullopt;
-+        }
-+      }
-+    }
-+  }
-+  if (size.has_value() && rotated) {
-+    return ImageSize{size->height, size->width};
-+  }
-+  return size;
-+}
-+}  // namespace
-+
-+std::optional<ImageSize> image_size::read(std::string_view data) {
-+  if (data.starts_with("\x89PNG\r\n\x1A\n")) {
-+    return read_png(data);
-+  }
-+  if (data.starts_with("GIF87a") || data.starts_with("GIF89a")) {
-+    return read_gif(data);
-+  }
-+  if (data.starts_with("\xFF\xD8")) {
-+    return read_jpeg(data);
-+  }
-+  if (data.starts_with("RIFF")) {
-+    return read_webp(data);
-+  }
-+  if (data.starts_with("BM")) {
-+    return read_bmp(data);
-+  }
-+  if (data.size() >= 16 && data.substr(4, 4) == "ftyp") {
-+    // The major brand, then after the minor version the compatible brands.
-+    const size_t end = std::min<size_t>(be32(data, 0), data.size());
-+    for (size_t at = 8; at + 4 <= end; at += at == 8 ? 8 : 4) {
-+      const std::string_view brand = data.substr(at, 4);
-+      if (brand == "avif" || brand == "avis") {
-+        return read_avif(data);
-+      }
-+    }
-+  }
-+  return std::nullopt;
-+}
-diff --git a/src/image_size.hpp b/src/image_size.hpp
-new file mode 100644
-index 0000000..909d84d
---- /dev/null
-+++ b/src/image_size.hpp
-@@ -0,0 +1,19 @@
-+#pragma once
-+
-+#include <cstdint>
-+#include <optional>
-+#include <string_view>
-+
-+struct ImageSize {
-+  uint32_t width = 0;
-+  uint32_t height = 0;
-+};
-+
-+namespace image_size {
-+// The size a browser shows an image at, read from its header without decoding
-+// it: PNG, GIF, JPEG, WebP, BMP and AVIF. Empty for any other format, a header
-+// that does not parse, and an image whose shown size the header alone does not
-+// settle: EXIF orientation in a PNG, or an AVIF crop, rotation or non-square
-+// pixels. A JPEG's EXIF orientation is applied.
-+std::optional<ImageSize> read(std::string_view data);
-+}  // namespace image_size
 diff --git a/src/importer.cpp b/src/importer.cpp
-index 75a971e..6ee3139 100644
+index 1920e45..c57f776 100644
 --- a/src/importer.cpp
 +++ b/src/importer.cpp
-@@ -29,6 +29,7 @@
+@@ -147,6 +147,10 @@ struct GlossarySpan {
+   uint32_t size = 0;
+   // What form-of references the glossary holds (src/json/form_of.hpp).
+   yomitan_parser::FormOfKind form_of = yomitan_parser::FormOfKind::None;
++#ifdef HOSHIDICTS_YOMITAN
++  // Whether it has a definition that is not an array, which Yomitan shows.
++  bool shown_definition = false;
++#endif
+ };
  
- #include "hash/bloom.hpp"
- #include "hash/hash.hpp"
-+#include "image_size.hpp"
- #include "json/yomitan_parser.hpp"
- #include "path_utils.hpp"
- #include "mdict/mdict_reader.hpp"
-@@ -158,6 +159,8 @@ struct ProcessedFile {
+ struct ProcessedFile {
+@@ -160,6 +164,10 @@ struct ProcessedFile {
    ankerl::unordered_dense::map<uint64_t, GlossarySpan> glossaries;
    std::vector<std::pair<uint64_t, uint64_t>> glossary_offsets;
    SummaryMetaCount meta_counts;
++#ifdef HOSHIDICTS_YOMITAN
 +  // The images the bank's glossaries show, each once.
 +  std::vector<ImportImage> images;
++#endif
    size_t count = 0;
    // (prefix hash, code point length) of every expression or reading longer
    // than scan_index::long_key_min_codepoints; see scan_index.hpp.
-@@ -176,8 +179,18 @@ void note_long_key(std::vector<std::pair<uint64_t, uint16_t>>& long_keys, std::s
+@@ -178,8 +186,27 @@ void note_long_key(std::vector<std::pair<uint64_t, uint16_t>>& long_keys, std::s
    }
  }
  
-+// A bank that does not hold the rows its name promises fails the import, as
-+// Yomitan's schema validation did, rather than leaving its rows out.
++#ifdef HOSHIDICTS_YOMITAN
++constexpr bool yomitan_host = true;
++#else
++constexpr bool yomitan_host = false;
++#endif
++
++// For Yomitan's host, a bank that does not hold the rows its name promises
++// fails the import, as Yomitan's schema validation did; otherwise its rows, or
++// those it cannot read, are left out.
++constexpr bool strict_banks = yomitan_host;
++
 +[[noreturn]] void throw_invalid_data(const std::string& name) {
 +  throw std::runtime_error("invalid data in '" + name + "'");
 +}
@@ -627,35 +206,74 @@ index 75a971e..6ee3139 100644
  bool is_bank_or_meta(const std::string& name) {
    return name.starts_with("term_bank_") || name.starts_with("term_meta_bank_") || name.starts_with("kanji_bank_") ||
           name.starts_with("kanji_meta_bank_") || name.starts_with("tag_bank_") || name == "styles.css" ||
-@@ -400,15 +413,12 @@ std::vector<char> train_zstd_dict(const DictionarySource& source, const Files& f
-   return dict;
+@@ -404,30 +431,49 @@ std::vector<char> train_zstd_dict(const DictionarySource& source, const Files& f
+ 
+ // A term record's form-of slot (src/json/form_of.hpp; docs/languages.md,
+ // section 9.10): count 0 for a row without form-of references, as every
+-// importer wrote before, otherwise the flag entry.
+-void write_form_of(std::vector<char>& out, yomitan_parser::FormOfKind kind) {
++// importer wrote before, otherwise the flag entry. For Yomitan's host, the
++// references of `definitions` follow the flag, which readers that look only
++// for the flag pass over.
++void write_form_of(std::vector<char>& out, yomitan_parser::FormOfKind kind, std::string_view definitions) {
+   if (kind == yomitan_parser::FormOfKind::None) {
+     write_val<uint32_t>(out, 0);
+     return;
+   }
++  std::vector<FormOfReference> references;
++  if constexpr (yomitan_host) {
++    yomitan_parser::read_form_of(definitions, references);
++  }
+   const uint32_t rules = kind == yomitan_parser::FormOfKind::WithOthers ? form_of_slot::with_definitions
+                                                                         : form_of_slot::only_references;
+-  write_val<uint32_t>(out, 1);
++  write_val<uint32_t>(out, 1 + references.size());
+   write_val<uint32_t>(out, 0);  // an empty formOf
+   write_val<uint32_t>(out, rules);
+   for (uint32_t i = 0; i < rules; ++i) {
+     write_val<uint32_t>(out, 0);  // an empty rule
+   }
++  for (const auto& reference : references) {
++    write_val<uint32_t>(out, reference.form_of.size());
++    write_str(out, reference.form_of);
++    write_val<uint32_t>(out, reference.rules.size());
++    for (const auto& rule : reference.rules) {
++      write_val<uint32_t>(out, rule.size());
++      write_str(out, rule);
++    }
++  }
  }
  
 -ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
 +ProcessedFile process_term_bank(std::string content, const std::string& name, const ZSTD_CDict* cdict,
-+                                bool sequenced) {
++                                [[maybe_unused]] bool sequenced) {
    ProcessedFile processed;
 -  if (content.empty()) {
--    return processed;
--  }
--
-   std::vector<Term> out;
-   if (!yomitan_parser::parse_term_bank(content, out)) {
--    return processed;
-+    throw_invalid_data(name);
++  if (content.empty() && !strict_banks) {
+     return processed;
    }
  
-   ZSTD_CCtx* cctx = ZSTD_createCCtx();
-@@ -423,8 +433,21 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+   std::vector<Term> out;
+   if (!yomitan_parser::parse_term_bank(content, out)) {
++    if constexpr (strict_banks) {
++      throw_invalid_data(name);
++    }
+     return processed;
+   }
+ 
+@@ -443,8 +489,25 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
    // Records hold the bank's non-glossary strings plus fixed headers.
    processed.data.reserve(content.size() / 4);
    processed.offsets.reserve(out.size() * 2);
-+  std::vector<GlossaryRedirect> redirects;
++#ifdef HOSHIDICTS_YOMITAN
 +  std::vector<std::string> image_paths;
 +  ankerl::unordered_dense::set<std::string> seen_images;
++#endif
    for (auto& term : out) {
      const std::string_view glossary = term.glossary.str;
++#ifdef HOSHIDICTS_YOMITAN
 +    if (!glossary.starts_with('[')) {
++      ZSTD_freeCCtx(cctx);
 +      throw_invalid_data(name);
 +    }
 +    image_paths.clear();
@@ -665,54 +283,54 @@ index 75a971e..6ee3139 100644
 +        processed.images.push_back({std::move(path), std::string(term.expression), std::string(term.reading)});
 +      }
 +    }
++#endif
      uint64_t glossary_hash = XXH3_64bits(glossary.data(), glossary.size());
      auto [it, inserted] = processed.glossaries.try_emplace(glossary_hash);
      if (inserted) {
-@@ -468,17 +491,41 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+@@ -459,6 +522,9 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+       }
+       processed.glossary_blob.resize(start + compressed_size);
+       it->second = GlossarySpan{start, static_cast<uint32_t>(compressed_size), yomitan_parser::form_of_kind(glossary)};
++#ifdef HOSHIDICTS_YOMITAN
++      it->second.shown_definition = yomitan_parser::has_shown_definition(glossary);
++#endif
+     }
+ 
+     uint64_t offset = processed.data.size();
+@@ -488,17 +554,31 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
      write_str(processed.data, term.rules);
      write_val<uint8_t>(processed.data, term.term_tags.size());
      write_str(processed.data, term.term_tags);
--    write_val<uint32_t>(processed.data, 0);
-+    // The redirects and the count of displayable items let a reader answer
-+    // Yomitan's deinflection and filtering without decompressing the glossary.
-+    redirects.clear();
-+    size_t content_count = 0;
-+    if (!yomitan_parser::parse_glossary_redirects(glossary, redirects, content_count)) {
-+      throw_invalid_data(name);
-+    }
-+    write_val<uint32_t>(processed.data, redirects.size());
-+    for (const auto& redirect : redirects) {
-+      write_val<uint32_t>(processed.data, redirect.form_of.size());
-+      write_str(processed.data, redirect.form_of);
-+      write_val<uint32_t>(processed.data, redirect.rules.size());
-+      for (const auto& rule : redirect.rules) {
-+        write_val<uint32_t>(processed.data, rule.size());
-+        write_str(processed.data, rule);
-+      }
-+    }
-+    write_val<uint16_t>(processed.data, std::min<size_t>(content_count, UINT16_MAX));
-+    write_val<int64_t>(processed.data, term.sequence);
+-    write_form_of(processed.data, it->second.form_of);
++    write_form_of(processed.data, it->second.form_of, glossary);
      // The Yomitan schema types score as a JSON number; keep the parsed double
      // rather than truncating to int32 (fractions were collapsing, and magnitudes
      // beyond int32 were undefined behaviour in the cast). Readers select on the
--    // .hoshidicts_5/_6 marker.
-+    // .hoshidicts_5 and later markers.
+     // .hoshidicts_5/_6 marker.
      write_val<double>(processed.data, term.score);
++#ifdef HOSHIDICTS_YOMITAN
++    // What Yomitan's database kept of a row beside its glossary, after the
++    // fields other readers read (.hoshidicts_yomitan_1).
++    write_val<uint8_t>(processed.data, it->second.shown_definition ? 1 : 0);
++    write_val<int64_t>(processed.data, term.sequence);
++#endif
  
      processed.offsets.emplace_back(XXH3_64bits(expr.data(), expr.size()), offset);
      if (reading != expr) {
        processed.offsets.emplace_back(XXH3_64bits(reading.data(), reading.size()), offset);
      }
++#ifdef HOSHIDICTS_YOMITAN
 +    // A sequenced dictionary's rows are found by sequence too (Yomitan merges
 +    // the rows that share one); other dictionaries' sequences carry no meaning.
 +    if (sequenced && term.sequence >= 0) {
 +      const std::string key = yomitan_parser::sequence_key(term.sequence);
 +      processed.offsets.emplace_back(XXH3_64bits(key.data(), key.size()), offset);
 +    }
++#endif
      processed.count++;
    }
    ZSTD_freeCCtx(cctx);
-@@ -488,15 +535,11 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
+@@ -508,14 +588,17 @@ ProcessedFile process_term_bank(std::string content, const ZSTD_CDict* cdict) {
  
  // Term and kanji meta rows share one layout; `record_type` (1 for a term, 3 for
  // a kanji) keeps a kanji's frequency from answering a term with the same text.
@@ -720,28 +338,30 @@ index 75a971e..6ee3139 100644
 +ProcessedFile process_meta_bank(std::string content, const std::string& name, uint8_t record_type) {
    ProcessedFile processed;
 -  if (content.empty()) {
--    return processed;
--  }
--
-   std::vector<Meta> out;
-   if (!yomitan_parser::parse_meta_bank(content, out)) {
--    return processed;
-+    throw_invalid_data(name);
++  if (content.empty() && !strict_banks) {
+     return processed;
    }
  
-   // The records repeat the bank's strings with fixed headers, so the bank's
-@@ -504,6 +547,10 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
+   std::vector<Meta> out;
+   if (!yomitan_parser::parse_meta_bank(content, out)) {
++    if constexpr (strict_banks) {
++      throw_invalid_data(name);
++    }
+     return processed;
+   }
+ 
+@@ -524,6 +607,10 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
    processed.data.reserve(content.size());
    processed.offsets.reserve(out.size());
    for (auto& meta : out) {
 +    // glaze leaves the elements a short row lacks at their defaults.
-+    if (meta.data.str.empty()) {
++    if (strict_banks && meta.data.str.empty()) {
 +      throw_invalid_data(name);
 +    }
      uint64_t offset = processed.data.size();
      std::string_view expr = meta.expression;
      std::string_view mode = meta.mode;
-@@ -526,20 +573,19 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
+@@ -546,20 +633,26 @@ ProcessedFile process_meta_bank(std::string content, uint8_t record_type) {
    return processed;
  }
  
@@ -749,46 +369,56 @@ index 75a971e..6ee3139 100644
 +ProcessedFile process_kanji_bank(std::string content, const std::string& name) {
    ProcessedFile processed;
 -  if (content.empty()) {
--    return processed;
--  }
--
++  if (content.empty() && !strict_banks) {
+     return processed;
+   }
+ 
    std::vector<Kanji> out;
    if (!yomitan_parser::parse_kanji_bank(content, out)) {
--    return processed;
-+    throw_invalid_data(name);
++    if constexpr (strict_banks) {
++      throw_invalid_data(name);
++    }
+     return processed;
    }
  
    processed.data.reserve(content.size());
    processed.offsets.reserve(out.size());
    for (auto& kanji : out) {
-+    if (kanji.character.empty()) {
++    if (strict_banks && kanji.character.empty()) {
 +      throw_invalid_data(name);
 +    }
      uint64_t offset = processed.data.size();
      std::string_view character = kanji.character;
      std::string_view onyomi = kanji.onyomi;
-@@ -590,14 +636,17 @@ size_t count_json_array(const std::string& content) {
+@@ -610,15 +703,25 @@ size_t count_json_array(const std::string& content) {
  }
  
  void count_unprocessed_banks(const DictionarySource& source, const Files& files, ImportResult& result) {
 -  // A tag bank that does not parse adds no tags; the import goes on, as it did
 -  // when tag banks were only counted.
++  // Without strict_banks, a tag bank that does not parse adds no tags; the
++  // import goes on, as it did when tag banks were only counted.
    for (int file_index : files.tag_banks) {
      const std::string content = source.read(file_index);
      result.summary.counts.tagMeta.total += count_json_array(content);
      std::vector<Tag> tags;
      if (!yomitan_parser::parse_tag_bank(content, tags)) {
--      continue;
-+      throw_invalid_data(bank_name(source, file_index));
-+    }
-+    for (const auto& tag : tags) {
-+      if (tag.name.empty()) {
++      if constexpr (strict_banks) {
 +        throw_invalid_data(bank_name(source, file_index));
 +      }
+       continue;
      }
++    if constexpr (strict_banks) {
++      for (const auto& tag : tags) {
++        if (tag.name.empty()) {
++          throw_invalid_data(bank_name(source, file_index));
++        }
++      }
++    }
      for (auto& tag : tags) {
        result.summary.tags.push_back(
-@@ -660,7 +709,7 @@ using LongKeyIndex = ankerl::unordered_dense::map<uint64_t, uint16_t>;
+           {std::move(tag.name), std::move(tag.category), tag.order, std::move(tag.notes), tag.score});
+@@ -680,7 +783,7 @@ using LongKeyIndex = ankerl::unordered_dense::map<uint64_t, uint16_t>;
  void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>& offsets,
                   const DictionarySource& source, const std::vector<int>& files, uint64_t& write_offset,
                   ImportResult& result, bool low_ram, const ZSTD_CDict* cdict, WorkerPool& pool,
@@ -797,21 +427,25 @@ index 75a971e..6ee3139 100644
    if (files.empty()) {
      return;
    }
-@@ -669,7 +718,13 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -689,7 +792,17 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
    std::deque<std::future<ProcessedFile>> threads;
  
    ankerl::unordered_dense::map<uint64_t, uint64_t> glossaries;
++#ifdef HOSHIDICTS_YOMITAN
 +  ankerl::unordered_dense::set<std::string> image_paths;
++#endif
    auto write_processed = [&](ProcessedFile&& processed) {
++#ifdef HOSHIDICTS_YOMITAN
 +    for (auto& image : processed.images) {
 +      if (image_paths.insert(image.path).second) {
 +        result.images.push_back(std::move(image));
 +      }
 +    }
++#endif
      if (processed.data.empty()) {
        return;
      }
-@@ -753,7 +808,7 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -773,7 +886,7 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
          bytes_ahead += task_bytes[index];
        }
        try {
@@ -820,7 +454,7 @@ index 75a971e..6ee3139 100644
          {
            std::lock_guard lock(mutex);
            processed[index].emplace(std::move(value));
-@@ -832,7 +887,9 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -852,7 +965,9 @@ void write_terms(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
  #else
    for (int file_index : files) {
      threads.push_back(std::async(
@@ -831,7 +465,7 @@ index 75a971e..6ee3139 100644
  
      if (threads.size() == max_threads) {
        write_processed(threads.front().get());
-@@ -906,7 +963,7 @@ void write_meta(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>&
+@@ -926,7 +1041,7 @@ void write_meta(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>&
    for (int file_index : files) {
      threads.push_back(
          pool.submit([&source, file_index, record_type]() {
@@ -840,7 +474,7 @@ index 75a971e..6ee3139 100644
          }));
  
      if (threads.size() == max_threads) {
-@@ -946,7 +1003,9 @@ void write_kanji(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
+@@ -966,7 +1081,9 @@ void write_kanji(std::ofstream& file, std::vector<std::pair<uint64_t, uint64_t>>
  
    for (int file_index : files) {
      threads.push_back(
@@ -851,57 +485,7 @@ index 75a971e..6ee3139 100644
  
      if (threads.size() == max_threads) {
        write_processed(threads.front().get());
-@@ -999,9 +1058,17 @@ std::vector<char> build_offset_index(std::vector<std::pair<uint64_t, uint64_t>>&
-   return offset_buf;
- }
- 
--size_t write_media(const std::filesystem::path& path, const DictionarySource& source, const std::vector<int>& files) {
-+struct WrittenMedia {
-+  size_t count = 0;
-+  // The size of each image whose header gives it.
-+  ankerl::unordered_dense::map<std::string, ImageSize> image_sizes;
-+};
-+
-+WrittenMedia write_media(const std::filesystem::path& path, const DictionarySource& source,
-+                         const std::vector<int>& files) {
-+  WrittenMedia written;
-   if (files.empty()) {
--    return 0;
-+    return written;
-   }
- 
-   std::ofstream media(path / "media.bin", std::ios::binary);
-@@ -1009,7 +1076,6 @@ size_t write_media(const std::filesystem::path& path, const DictionarySource& so
-   setup_stream_exceptions(media);
-   setup_stream_exceptions(media_idx);
- 
--  size_t media_count = 0;
-   uint32_t write_pos = 0;
-   std::vector<char> buf;
-   std::vector<std::pair<std::string, uint32_t>> index_entries;
-@@ -1028,8 +1094,11 @@ size_t write_media(const std::filesystem::path& path, const DictionarySource& so
-     media.write(buf.data(), static_cast<std::streamsize>(buf.size()));
-     write_pos += buf.size();
- 
-+    if (auto size = image_size::read({media_file->blob.data(), media_file->blob.size()})) {
-+      written.image_sizes.emplace(media_file->path, *size);
-+    }
-     index_entries.emplace_back(std::move(media_file->path), record_start);
--    media_count++;
-+    written.count++;
-   }
- 
-   std::ranges::sort(index_entries);
-@@ -1040,7 +1109,7 @@ size_t write_media(const std::filesystem::path& path, const DictionarySource& so
-   }
- 
-   media_idx.write(index_buf.data(), static_cast<std::streamsize>(index_buf.size()));
--  return media_count;
-+  return written;
- }
- }
- 
-@@ -1118,7 +1187,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
+@@ -1138,7 +1255,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
      uint64_t write_offset = 0;
      LongKeyIndex long_keys;
      write_terms(blobs, offsets, source, files.term_banks, write_offset, result, low_ram, cdict.get(), pool,
@@ -910,151 +494,133 @@ index 75a971e..6ee3139 100644
      write_scan_index(dict_path, long_keys);
      write_meta(blobs, offsets, source, files.meta_banks, 1, write_offset, result.summary.counts.termMeta, low_ram,
                 pool);
-@@ -1143,7 +1212,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
-     // Media extraction runs beside the sort; the sort keeps one thread short
-     // of the pool so that it never waits behind it.
-     const bool media_on_pool = pool.size() > 1 && !files.media_files.empty();
--    std::future<size_t> media_thread = pool.submit(
-+    std::future<WrittenMedia> media_thread = pool.submit(
-         [&dict_path, &source, &files]() { return write_media(dict_path, source, files.media_files); });
- 
-     std::vector<std::pair<uint64_t, uint64_t>> hash_entries;
-@@ -1167,7 +1236,14 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
-     }
-     hash_thread.get();
- 
--    result.summary.counts.media.total = media_thread.get();
-+    const WrittenMedia media = media_thread.get();
-+    result.summary.counts.media.total = media.count;
-+    for (auto& image : result.images) {
-+      if (const auto it = media.image_sizes.find(image.path); it != media.image_sizes.end()) {
-+        image.width = it->second.width;
-+        image.height = it->second.height;
-+      }
-+    }
-     result.warnings = source.warnings();
- 
-     std::string summary_json;
-@@ -1183,7 +1259,7 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
-     setup_stream_exceptions(index_file);
+@@ -1204,6 +1321,10 @@ ImportResult dictionary_importer::import(const std::string& source_path, const s
      index_file.write(summary_json.data(), static_cast<std::streamsize>(summary_json.size()));
  
--    std::ofstream sui(dict_path / (zstd_dict.empty() ? ".hoshidicts_5" : ".hoshidicts_6"), std::ios::binary);
-+    std::ofstream sui(dict_path / ".hoshidicts_7", std::ios::binary);
+     std::ofstream sui(dict_path / (zstd_dict.empty() ? ".hoshidicts_5" : ".hoshidicts_6"), std::ios::binary);
++#ifdef HOSHIDICTS_YOMITAN
++    // The term records' fields for Yomitan's host, which DictionaryQuery::query_rows reads.
++    std::ofstream yomitan_marker(dict_path / ".hoshidicts_yomitan_1", std::ios::binary);
++#endif
      result.success = true;
    } catch (const std::exception& e) {
      result.success = false;
 diff --git a/src/json/yomitan_parser.cpp b/src/json/yomitan_parser.cpp
-index 63591e8..39b85e1 100644
+index 2a99d49..83ec68a 100644
 --- a/src/json/yomitan_parser.cpp
 +++ b/src/json/yomitan_parser.cpp
-@@ -414,3 +414,84 @@ bool yomitan_parser::parse_ipa(std::string_view content, ParsedPitch& out) {
-   }
-   return true;
+@@ -3,6 +3,7 @@
+ #include <algorithm>
+ #include <charconv>
+ #include <cstring>
++#include <functional>
+ #include <limits>
+ #include <optional>
+ #include <string>
+@@ -560,3 +561,87 @@ std::string yomitan_parser::without_form_of(std::string_view definitions) {
+   out += ']';
+   return out;
  }
 +
-+namespace {
-+const glz::generic* find_member(const glz::generic& value, std::string_view key) {
-+  return value.is_object() && value.contains(key) ? &value.at(key) : nullptr;
-+}
-+
-+bool is_string(const glz::generic* value, std::string_view expected) {
-+  return value != nullptr && value->is_string() && value->get_string() == expected;
-+}
-+
-+void add_structured_content_image_paths(const glz::generic& content, std::vector<std::string>& paths) {
-+  if (content.is_array()) {
-+    for (const auto& child : content.get_array()) {
-+      add_structured_content_image_paths(child, paths);
-+    }
-+    return;
++#ifdef HOSHIDICTS_YOMITAN
++bool yomitan_parser::has_shown_definition(std::string_view definitions) {
++  // Most rows' first definition is one; arrays are only walked past.
++  const char* p = definitions.data();
++  const char* const end = p + definitions.size();
++  p = skip_space(p, end);
++  if (p == end || *p != '[') return false;
++  p = skip_space(p + 1, end);
++  while (p < end && *p != ']') {
++    if (*p != '[') return true;
++    p = skip_value(p, end);
++    if (p == nullptr) return false;
++    p = skip_space(p, end);
++    if (p == end || *p != ',') return false;
++    p = skip_space(p + 1, end);
 +  }
-+  if (is_string(find_member(content, "tag"), "img")) {
-+    const glz::generic* path = find_member(content, "path");
-+    if (path != nullptr && path->is_string()) {
-+      paths.push_back(path->get_string());
-+    }
-+    return;
-+  }
-+  if (const glz::generic* child = find_member(content, "content")) {
-+    add_structured_content_image_paths(*child, paths);
-+  }
++  return false;
 +}
-+}  // namespace
 +
 +void yomitan_parser::add_glossary_image_paths(std::string_view glossary, std::vector<std::string>& paths) {
-+  // Every image names a path; few glossaries do, so only those are parsed.
-+  constexpr std::string_view path_key = "\"path\"";
-+  if (glossary.find(path_key) == std::string_view::npos) {
++  // Every image names a path; few glossaries do, so only those are scanned.
++  // JSON has a quote every few bytes, where a search that starts with one stops.
++  static const std::boyer_moore_horspool_searcher path_key(std::string_view("\"path\"").begin(),
++                                                           std::string_view("\"path\"").end());
++  if (std::search(glossary.begin(), glossary.end(), path_key) == glossary.end()) {
 +    return;
 +  }
-+  std::vector<hoshidicts::raw_value_view> items;
-+  if (glz::read<bank_opts>(items, glossary)) {
-+    return;
-+  }
-+  for (const auto& item : items) {
-+    if (!item.str.starts_with('{') || item.str.find(path_key) == std::string_view::npos) {
-+      continue;
-+    }
-+    glz::generic value;
-+    if (glz::read_json(value, item.str)) {
-+      continue;
-+    }
-+    const glz::generic* type = find_member(value, "type");
-+    if (is_string(type, "image")) {
-+      const glz::generic* path = find_member(value, "path");
-+      if (path != nullptr && path->is_string()) {
-+        paths.push_back(path->get_string());
++  // The objects the scan is in: an image is an object whose "type" is "image"
++  // (a definition) or whose "tag" is "img" (structured content), and its path
++  // is taken when the object ends.
++  struct Object {
++    bool image = false;
++    bool has_path = false;
++    std::string_view path;
++  };
++  std::vector<Object> objects;
++  const char* p = glossary.data();
++  const char* const end = p + glossary.size();
++  while (p < end) {
++    if (*p == '{') {
++      objects.emplace_back();
++      ++p;
++    } else if (*p == '}') {
++      if (!objects.empty()) {
++        const Object& object = objects.back();
++        if (object.image && object.has_path) {
++          paths.push_back(decode_string(object.path));
++        }
++        objects.pop_back();
 +      }
-+    } else if (is_string(type, "structured-content")) {
-+      if (const glz::generic* content = find_member(value, "content")) {
-+        add_structured_content_image_paths(*content, paths);
++      ++p;
++    } else if (*p == '"') {
++      const char* const string_end = skip_string(p, end);
++      if (string_end == nullptr) return;
++      const char* q = skip_space(string_end, end);
++      if (objects.empty() || q == end || *q != ':') {
++        p = string_end;
++        continue;
 +      }
++      // A key: its value is read here when it is a string.
++      const std::string_view key(p + 1, static_cast<size_t>(string_end - p - 2));
++      q = skip_space(q + 1, end);
++      if (q == end || *q != '"') {
++        p = q;
++        continue;
++      }
++      const char* const value_end = skip_string(q, end);
++      if (value_end == nullptr) return;
++      const std::string_view value(q, static_cast<size_t>(value_end - q));
++      Object& object = objects.back();
++      if (key == "path") {
++        object.has_path = true;
++        object.path = value;
++      } else if ((key == "type" && value == "\"image\"") || (key == "tag" && value == "\"img\"")) {
++        object.image = true;
++      }
++      p = value_end;
++    } else {
++      ++p;
 +    }
 +  }
 +}
-+
-+bool yomitan_parser::parse_glossary_redirects(std::string_view glossary, std::vector<GlossaryRedirect>& redirects,
-+                                              size_t& content_count) {
-+  std::vector<hoshidicts::raw_value_view> items;
-+  if (glz::read<bank_opts>(items, glossary)) {
-+    return false;
-+  }
-+  content_count = 0;
-+  for (const auto& item : items) {
-+    if (!item.str.starts_with('[')) {
-+      ++content_count;
-+      continue;
-+    }
-+    std::tuple<std::string, std::vector<std::string>> redirect;
-+    if (!glz::read<glz::opts{.error_on_unknown_keys = false}>(redirect, item.str)) {
-+      redirects.push_back({std::move(std::get<0>(redirect)), std::move(std::get<1>(redirect))});
-+    }
-+  }
-+  return true;
-+}
++#endif
 diff --git a/src/json/yomitan_parser.hpp b/src/json/yomitan_parser.hpp
-index 7e4a7b4..26e366c 100644
+index 6621fc6..aefcb51 100644
 --- a/src/json/yomitan_parser.hpp
 +++ b/src/json/yomitan_parser.hpp
-@@ -1,4 +1,6 @@
+@@ -1,5 +1,6 @@
  #pragma once
-+
-+#include <cstring>
  #include <cstdint>
++#include <cstring>
  #include <glaze/glaze.hpp>
  
-@@ -42,6 +44,23 @@ struct Term {
+ #include "form_of.hpp"
+@@ -43,6 +44,18 @@ struct Term {
    std::string_view term_tags;
  };
  
-+// A glossary item of the form [uninflected term, [inflection rules]]: Yomitan
-+// looks the term up as a deinflection of the row instead of showing the item.
-+struct GlossaryRedirect {
-+  std::string form_of;
-+  std::vector<std::string> rules;
-+};
-+
++#ifdef HOSHIDICTS_YOMITAN
 +namespace yomitan_parser {
 +// The hash-table key a sequenced dictionary files each row under besides its
 +// expression and reading. It starts with a NUL, which no term holds.
@@ -1064,30 +630,29 @@ index 7e4a7b4..26e366c 100644
 +  return key;
 +}
 +}  // namespace yomitan_parser
++#endif
 +
  struct Meta {
    std::string_view expression;
    std::string_view mode;
-@@ -97,6 +116,14 @@ bool parse_meta_bank(std::string& content, std::vector<Meta>& out);
- bool parse_kanji_bank(std::string& content, std::vector<Kanji>& out);
- bool parse_tag_bank(std::string_view content, std::vector<Tag>& out);
- bool parse_frequency(std::string_view content, ParsedFrequency& out);
-+// Splits a glossary's top-level items into its redirects and a count of the
-+// others, the items Yomitan shows. An array item that is not a well-formed
-+// redirect counts as neither, as Yomitan drops every array item from display.
-+bool parse_glossary_redirects(std::string_view glossary, std::vector<GlossaryRedirect>& redirects,
-+                              size_t& content_count);
+@@ -115,4 +128,12 @@ FormOfKind form_of_kind(std::string_view definitions);
+ // `definitions` without its top-level array items, which are form-of data;
+ // unchanged when it is not a well-formed array.
+ std::string without_form_of(std::string_view definitions);
++#ifdef HOSHIDICTS_YOMITAN
++// Whether a row's definitions hold one that is not an array, which Yomitan
++// shows.
++bool has_shown_definition(std::string_view definitions);
 +// Appends the path of each image a glossary shows: an image item's, or that of
 +// an img element anywhere in a structured-content item.
 +void add_glossary_image_paths(std::string_view glossary, std::vector<std::string>& paths);
- bool parse_pitch(std::string_view content, ParsedPitch& out);
- bool parse_ipa(std::string_view content, ParsedPitch& out);
++#endif
  };
 diff --git a/src/memory/memory.cpp b/src/memory/memory.cpp
-index 83bcee4..f4f7f49 100644
+index 08126bf..0782601 100644
 --- a/src/memory/memory.cpp
 +++ b/src/memory/memory.cpp
-@@ -266,6 +266,17 @@ bool file_reader::read(void* out, size_t len, uint64_t offset) const {
+@@ -383,6 +383,17 @@ bool file_reader::read(void* out, size_t len, uint64_t offset) const {
    return true;
  }
  
@@ -1106,10 +671,10 @@ index 83bcee4..f4f7f49 100644
  #ifdef _WIN32
    if (handle_ != nullptr) {
 diff --git a/src/memory/memory.hpp b/src/memory/memory.hpp
-index 16b8453..b07761c 100644
+index dbb4e4b..bfc3846 100644
 --- a/src/memory/memory.hpp
 +++ b/src/memory/memory.hpp
-@@ -43,6 +43,9 @@ class file_reader {
+@@ -61,6 +61,9 @@ class file_reader {
    // Copies `len` bytes at `offset` into `out`; false on an I/O error or a
    // range beyond the end of the file.
    bool read(void* out, size_t len, uint64_t offset) const;
@@ -1149,399 +714,117 @@ index 1debfb3..c524591 100644
    void forget(uint64_t file_id);
  
 diff --git a/src/query.cpp b/src/query.cpp
-index 6df3c68..03a80b3 100644
+index dd43f36..5dfb885 100644
 --- a/src/query.cpp
 +++ b/src/query.cpp
-@@ -11,10 +11,12 @@
- #include <cstring>
- #include <filesystem>
- #include <fstream>
-+#include <initializer_list>
- #include <memory>
- #include <ranges>
- #include <stdexcept>
- #include <string_view>
-+#include <utility>
- #include <vector>
+@@ -92,6 +92,11 @@ bool read_whole(const std::filesystem::path& path, std::string& out, std::ios::o
  
- #include "blob_file.hpp"
-@@ -318,7 +320,9 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
-   // same pair with the score stored as a double, which is what the Yomitan
-   // schema's JSON number can hold (fractions, and magnitudes beyond int32).
-   int version = 0;
--  if (std::filesystem::is_regular_file(path / ".hoshidicts_6")) {
-+  if (std::filesystem::is_regular_file(path / ".hoshidicts_7")) {
-+    version = 7;
-+  } else if (std::filesystem::is_regular_file(path / ".hoshidicts_6")) {
-     version = 6;
-   } else if (std::filesystem::is_regular_file(path / ".hoshidicts_5")) {
-     version = 5;
-@@ -393,7 +397,8 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
-     dict.data->media_index = memory::map_rd(path / "media.idx");
-   }
+ struct DictionaryQuery::DictionaryData {
+   int version;
++#ifdef HOSHIDICTS_YOMITAN
++  // The term records hold the fields for Yomitan's host after the score
++  // (.hoshidicts_yomitan_1).
++  bool yomitan_rows = false;
++#endif
+   // The imported summary's tag-bank rows (empty before they were stored).
+   std::vector<SummaryTag> tags;
+   hash::linear table;
+@@ -379,6 +384,9 @@ bool DictionaryQuery::open_dict_(const std::string& path_utf8, Dictionary& dict,
  
--  if (version == 4 || version == 6) {
-+  // From version 7 one marker serves both; dict.zstd is there when it was trained.
-+  if (version == 4 || version == 6 || (version >= 7 && std::filesystem::is_regular_file(path / "dict.zstd"))) {
-     std::ifstream f(path / "dict.zstd", std::ios::binary);
-     const std::string blob(std::istreambuf_iterator<char>(f), {});
-     dict.data->zstd_dict =
-@@ -614,6 +619,9 @@ RawTerms DictionaryQuery::query_raw(const std::string& expression, BlobPins& pin
-             }
-           }
-         }
-+        if (data->version >= 7) {
-+          blob.skip(sizeof(uint16_t) + sizeof(int64_t));
-+        }
+   dict.data = std::make_shared<DictionaryData>();
+   dict.data->version = version;
++#ifdef HOSHIDICTS_YOMITAN
++  dict.data->yomitan_rows = std::filesystem::is_regular_file(path / ".hoshidicts_yomitan_1");
++#endif
+   dict.data->tags = std::move(summary.tags);
  
-         double score = 0;
-         if (data->version >= 5) {
-@@ -1196,3 +1204,345 @@ bool DictionaryQuery::hash_index_paged(const std::string& path) const {
+   const bool index_paged = index_storage == DictionaryIndexStorage::Paged;
+@@ -1254,3 +1262,40 @@ bool DictionaryQuery::hash_index_paged(const std::string& path) const {
    const auto* dict = find_loaded(path);
    return dict && dict->data->table.paged();
  }
 +
-+namespace {
-+// Appends the term record at `offset`, of version 7 or later, to `rows` when
-+// `accept` takes its expression and reading, and returns whether it did.
-+template <typename Open, typename Accept>
-+bool read_term_row(Open& open, uint64_t offset, const std::string& dict_name, Accept&& accept,
-+                   std::vector<TermRow>& rows) {
-+  auto blob = open(offset);
-+  if (read_value<uint8_t>(blob) != 0) {
-+    return false;
-+  }
-+  std::string_view expr = blob.str(read_value<uint16_t>(blob));
-+  std::string_view reading = blob.str(read_value<uint16_t>(blob));
-+  if (!accept(expr, reading)) {
-+    return false;
-+  }
-+  // The glossary's offset and size, which query_glossary reads.
-+  blob.skip(sizeof(uint64_t) + sizeof(uint32_t));
-+  TermRow& row = rows.emplace_back();
-+  row.dict_name = dict_name;
-+  row.expression = expr;
-+  row.reading = reading;
-+  row.offset = offset;
-+  row.definition_tags = blob.str(read_value<uint8_t>(blob));
-+  row.rules = blob.str(read_value<uint8_t>(blob));
-+  row.term_tags = blob.str(read_value<uint8_t>(blob));
-+  auto redirect_count = read_value<uint32_t>(blob);
-+  for (uint32_t r = 0; r < redirect_count; r++) {
-+    TermRedirect& redirect = row.redirects.emplace_back();
-+    redirect.form_of = blob.str(read_value<uint32_t>(blob));
-+    auto rule_count = read_value<uint32_t>(blob);
-+    for (uint32_t j = 0; j < rule_count; j++) {
-+      redirect.rules.emplace_back(blob.str(read_value<uint32_t>(blob)));
-+    }
-+  }
-+  row.content_count = read_value<uint16_t>(blob);
-+  row.sequence = read_value<int64_t>(blob);
-+  row.score = read_value<double>(blob);
-+  return true;
-+}
-+}  // namespace
-+
-+std::vector<TermRow> DictionaryQuery::query_rows(const std::string& key) const {
-+  std::vector<TermRow> rows;
-+  BlobPins pins;
-+  for (const auto& dict : term_dicts_) {
-+    const auto& data = dict.data;
-+    uint64_t offset_addr = data->version >= 7 ? data->table(key) : 0;
-+    if (offset_addr == 0) {
-+      continue;
-+    }
-+    visit_blobs(data->blobs, pins, [&](auto open) {
-+      auto index = open(offset_addr);
-+      auto count = read_value<uint32_t>(index);
-+      for (uint32_t i = 0; i < count; i++) {
-+        if (read_term_row(
-+                open, read_value<uint64_t>(index), dict.name,
-+                [&](std::string_view expr, std::string_view reading) { return expr == key || reading == key; }, rows)) {
-+          TermRow& row = rows.back();
-+          row.reading_match = row.expression != key;
-+        }
-+      }
-+    });
-+  }
-+  return rows;
-+}
-+
-+std::vector<TermRow> DictionaryQuery::query_sequence_rows(const std::string& dict_name, int64_t sequence) const {
-+  std::vector<TermRow> rows;
-+  const std::string key = yomitan_parser::sequence_key(sequence);
-+  BlobPins pins;
-+  for (const auto& dict : term_dicts_) {
-+    if (dict.name != dict_name) {
-+      continue;
-+    }
-+    const auto& data = dict.data;
-+    uint64_t offset_addr = data->version >= 7 ? data->table(key) : 0;
-+    if (offset_addr == 0) {
++#ifdef HOSHIDICTS_YOMITAN
++std::vector<DictionaryFiles> QueryAccess::dictionaries(const DictionaryQuery& query, DictionaryKind kind) {
++  const std::vector<DictionaryQuery::Dictionary>* list = nullptr;
++  switch (kind) {
++    case DictionaryKind::Term:
++      list = &query.term_dicts_;
 +      break;
-+    }
-+    visit_blobs(data->blobs, pins, [&](auto open) {
-+      auto index = open(offset_addr);
-+      auto count = read_value<uint32_t>(index);
-+      for (uint32_t i = 0; i < count; i++) {
-+        // The key's hash may be an expression's too.
-+        if (read_term_row(open, read_value<uint64_t>(index), dict.name,
-+                          [](std::string_view, std::string_view) { return true; }, rows) &&
-+            rows.back().sequence != sequence) {
-+          rows.pop_back();
-+        }
-+      }
-+    });
-+    break;
++    case DictionaryKind::Frequency:
++      list = &query.freq_dicts_;
++      break;
++    case DictionaryKind::Pitch:
++      list = &query.pitch_dicts_;
++      break;
++    case DictionaryKind::Kanji:
++      list = &query.kanji_dicts_;
++      break;
 +  }
-+  return rows;
-+}
-+
-+std::optional<std::string> DictionaryQuery::query_glossary(const std::string& dict_name, uint64_t offset) const {
-+  for (const auto& dict : term_dicts_) {
-+    if (dict.name != dict_name) {
-+      continue;
-+    }
-+    const auto& data = dict.data;
-+    if (offset >= data->blobs.size()) {
-+      return std::nullopt;
-+    }
-+    BlobPins pins;
-+    std::optional<std::string> glossary;
-+    visit_blobs(data->blobs, pins, [&](auto open) {
-+      auto blob = open(offset);
-+      if (read_value<uint8_t>(blob) != 0) {
-+        return;
-+      }
-+      blob.skip(read_value<uint16_t>(blob));
-+      blob.skip(read_value<uint16_t>(blob));
-+      const auto glossary_offset = read_value<uint64_t>(blob);
-+      const auto glossary_size = read_value<uint32_t>(blob);
-+      glossary = decompress_glossary(data->blobs.range(glossary_offset, glossary_size, pins), glossary_size,
-+                                     data->zstd_dict);
-+    });
-+    return glossary;
++  std::vector<DictionaryFiles> files;
++  files.reserve(list->size());
++  for (const auto& dict : *list) {
++    const auto& data = *dict.data;
++    files.push_back(DictionaryFiles{.name = &dict.name,
++                                    .data = &data,
++                                    .table = &data.table,
++                                    .blobs = &data.blobs,
++                                    .zstd_dict = data.zstd_dict,
++                                    .yomitan_rows = data.yomitan_rows});
 +  }
-+  return std::nullopt;
++  return files;
 +}
 +
-+namespace {
-+// Enough of a term record for query_rows and query_glossary to read it whole,
-+// or the fields before its glossary, for most records.
-+constexpr size_t term_record_advice_bytes = 512;
-+}  // namespace
-+
-+void DictionaryQuery::prefetch_records(std::initializer_list<const std::vector<Dictionary>*> lists,
-+                                       std::span<const std::string> keys) const {
-+  // A dictionary loaded as several kinds shares its data.
-+  std::vector<const DictionaryData*> dicts;
-+  for (const auto* list : lists) {
-+    for (const auto& dict : *list) {
-+      const auto* data = dict.data.get();
-+      if (data->version >= 7 && data->blobs.paged() && std::ranges::find(dicts, data) == dicts.end()) {
-+        dicts.push_back(data);
-+      }
-+    }
-+  }
-+  // Only a hint, so a file that cannot be read is left to the query.
-+  try {
-+    for (const auto& key : keys) {
-+      for (const auto* data : dicts) {
-+        data->table.advise(key);
-+      }
-+    }
-+    // The index record of each key in each dictionary: a count, then the
-+    // offsets of the records.
-+    std::vector<std::pair<const DictionaryData*, uint64_t>> indexes;
-+    for (const auto& key : keys) {
-+      for (const auto* data : dicts) {
-+        const uint64_t offset = data->table(key);
-+        if (offset != 0) {
-+          data->blobs.advise(offset, sizeof(uint32_t));
-+          indexes.emplace_back(data, offset);
-+        }
-+      }
-+    }
-+    BlobPins pins;
-+    std::vector<uint32_t> counts;
-+    counts.reserve(indexes.size());
-+    for (const auto& [data, offset] : indexes) {
-+      BlobCursor index(data->blobs, offset, pins);
-+      const auto count = read_value<uint32_t>(index);
-+      counts.push_back(count);
-+      data->blobs.advise(offset + sizeof(uint32_t), count * sizeof(uint64_t));
-+    }
-+    for (size_t i = 0; i < indexes.size(); i++) {
-+      const auto& [data, offset] = indexes[i];
-+      BlobCursor index(data->blobs, offset + sizeof(uint32_t), pins);
-+      for (uint32_t j = 0; j < counts[i]; j++) {
-+        data->blobs.advise(read_value<uint64_t>(index), term_record_advice_bytes);
-+      }
-+    }
-+  } catch (const std::exception&) {
-+  }
++std::string QueryAccess::decompress_glossary(const DictionaryFiles& dict, uint64_t offset, uint32_t size,
++                                             BlobPins& pins) {
++  return DictionaryQuery::decompress_glossary(dict.blobs->range(offset, size, pins), size, dict.zstd_dict);
++}
++#endif
+diff --git a/src/query_internal.hpp b/src/query_internal.hpp
+index 2dd1204..5698769 100644
+--- a/src/query_internal.hpp
++++ b/src/query_internal.hpp
+@@ -69,6 +69,27 @@ struct RawTerms {
+   std::unique_ptr<NormalizedReadings> normalized;  // only with a reading normalizer
+ };
+ 
++#ifdef HOSHIDICTS_YOMITAN
++namespace hash {
++class linear;
 +}
 +
-+void DictionaryQuery::prefetch_rows(std::span<const std::string> keys) const {
-+  prefetch_records({&term_dicts_}, keys);
-+}
++enum class DictionaryKind : uint8_t { Term, Frequency, Pitch, Kanji };
 +
-+void DictionaryQuery::prefetch_meta_rows(std::span<const std::string> keys) const {
-+  prefetch_records({&freq_dicts_, &pitch_dicts_}, keys);
-+}
++// A loaded dictionary's files, which stay valid while it stays loaded.
++struct DictionaryFiles {
++  const std::string* name;
++  // Shared by every kind its path is loaded as.
++  const void* data;
++  const hash::linear* table;
++  const BlobFile* blobs;
++  const ZSTD_DDict_s* zstd_dict;
++  // The term records hold the fields for Yomitan's host after the score
++  // (.hoshidicts_yomitan_1).
++  bool yomitan_rows;
++};
++#endif
 +
-+void DictionaryQuery::prefetch_kanji_rows(std::span<const std::string> characters) const {
-+  prefetch_records({&kanji_dicts_}, characters);
-+}
-+
-+void DictionaryQuery::prefetch_kanji_meta_rows(std::span<const std::string> characters) const {
-+  prefetch_records({&freq_dicts_}, characters);
-+}
-+
-+void DictionaryQuery::prefetch_glossaries(std::span<const std::tuple<std::string, uint64_t>> items) const {
-+  try {
-+    std::vector<std::pair<const DictionaryData*, uint64_t>> records;
-+    for (const auto& [dict_name, offset] : items) {
-+      for (const auto& dict : term_dicts_) {
-+        if (dict.name != dict_name) {
-+          continue;
-+        }
-+        const auto* data = dict.data.get();
-+        if (data->blobs.paged() && offset < data->blobs.size()) {
-+          data->blobs.advise(offset, term_record_advice_bytes);
-+          records.emplace_back(data, offset);
-+        }
-+        break;
-+      }
-+    }
-+    BlobPins pins;
-+    for (const auto& [data, offset] : records) {
-+      BlobCursor record(data->blobs, offset, pins);
-+      if (read_value<uint8_t>(record) != 0) {
-+        continue;
-+      }
-+      record.skip(read_value<uint16_t>(record));
-+      record.skip(read_value<uint16_t>(record));
-+      const auto glossary_offset = read_value<uint64_t>(record);
-+      const auto glossary_size = read_value<uint32_t>(record);
-+      data->blobs.advise(glossary_offset, glossary_size);
-+    }
-+  } catch (const std::exception&) {
-+  }
-+}
-+
-+std::vector<MetaRow> DictionaryQuery::query_meta_rows(const std::string& key) const {
-+  std::vector<MetaRow> rows;
-+  BlobPins pins;
-+  std::vector<const DictionaryData*> seen;
-+  for (const auto* list : {&freq_dicts_, &pitch_dicts_}) {
-+    for (const auto& dict : *list) {
-+      const auto* data = dict.data.get();
-+      if (std::ranges::find(seen, data) != seen.end()) {
-+        continue;
-+      }
-+      seen.push_back(data);
-+      uint64_t offset_addr = data->table(key);
-+      if (offset_addr == 0) {
-+        continue;
-+      }
-+      visit_blobs(data->blobs, pins, [&](auto open) {
-+        auto index = open(offset_addr);
-+        auto count = read_value<uint32_t>(index);
-+        for (uint32_t i = 0; i < count; i++) {
-+          auto blob = open(read_value<uint64_t>(index));
-+          if (read_value<uint8_t>(blob) != 1) {
-+            continue;
-+          }
-+          std::string_view expr = blob.str(read_value<uint16_t>(blob));
-+          if (expr != key) {
-+            continue;
-+          }
-+          std::string_view mode = blob.str(read_value<uint8_t>(blob));
-+          std::string_view row_data = blob.str(read_value<uint32_t>(blob));
-+          rows.push_back(MetaRow{.dict_name = dict.name,
-+                                 .expression = std::string(expr),
-+                                 .mode = std::string(mode),
-+                                 .data = std::string(row_data)});
-+        }
-+      });
-+    }
-+  }
-+  return rows;
-+}
-+
-+std::vector<KanjiRow> DictionaryQuery::query_kanji_rows(const std::string& character) const {
-+  std::vector<KanjiRow> rows;
-+  BlobPins pins;
-+  for (const auto& dict : kanji_dicts_) {
-+    const auto& data = dict.data;
-+    uint64_t offset_addr = data->table(character);
-+    if (offset_addr == 0) {
-+      continue;
-+    }
-+    visit_blobs(data->blobs, pins, [&](auto open) {
-+      auto index = open(offset_addr);
-+      auto count = read_value<uint32_t>(index);
-+      for (uint32_t i = 0; i < count; i++) {
-+        auto blob = open(read_value<uint64_t>(index));
-+        if (read_value<uint8_t>(blob) != 2) {
-+          continue;
-+        }
-+        if (blob.str(read_value<uint8_t>(blob)) != character) {
-+          continue;
-+        }
-+        KanjiRow& row = rows.emplace_back();
-+        row.dict_name = dict.name;
-+        row.character = character;
-+        row.onyomi = blob.str(read_value<uint16_t>(blob));
-+        row.kunyomi = blob.str(read_value<uint16_t>(blob));
-+        row.tags = blob.str(read_value<uint16_t>(blob));
-+        auto meaning_count = read_value<uint16_t>(blob);
-+        for (uint16_t j = 0; j < meaning_count; j++) {
-+          row.meanings.emplace_back(blob.str(read_value<uint16_t>(blob)));
-+        }
-+        auto stat_count = read_value<uint16_t>(blob);
-+        for (uint16_t j = 0; j < stat_count; j++) {
-+          std::string name(blob.str(read_value<uint16_t>(blob)));
-+          row.stats.emplace(std::move(name), blob.str(read_value<uint16_t>(blob)));
-+        }
-+      }
-+    });
-+  }
-+  return rows;
-+}
-+
-+std::vector<MetaRow> DictionaryQuery::query_kanji_meta_rows(const std::string& character) const {
-+  std::vector<MetaRow> rows;
-+  BlobPins pins;
-+  for (const auto& dict : freq_dicts_) {
-+    const auto& data = dict.data;
-+    uint64_t offset_addr = data->table(character);
-+    if (offset_addr == 0) {
-+      continue;
-+    }
-+    visit_blobs(data->blobs, pins, [&](auto open) {
-+      auto index = open(offset_addr);
-+      auto count = read_value<uint32_t>(index);
-+      for (uint32_t i = 0; i < count; i++) {
-+        auto blob = open(read_value<uint64_t>(index));
-+        if (read_value<uint8_t>(blob) != 3) {
-+          continue;
-+        }
-+        if (blob.str(read_value<uint16_t>(blob)) != character) {
-+          continue;
-+        }
-+        std::string_view mode = blob.str(read_value<uint8_t>(blob));
-+        std::string_view row_data = blob.str(read_value<uint32_t>(blob));
-+        rows.push_back(MetaRow{.dict_name = dict.name,
-+                               .expression = character,
-+                               .mode = std::string(mode),
-+                               .data = std::string(row_data)});
-+      }
-+    });
-+  }
-+  return rows;
-+}
+ // The raw terms of every loaded term dictionary for `expression`, and the
+ // form-of references of a row, for the library's own tools (hoshidicts-cli
+ // eval-language), as a lookup reads them.
+@@ -80,4 +101,12 @@ struct QueryAccess {
+   static void read_form_of(const RawFormOfRow& row, BlobPins& pins, std::vector<FormOfReference>& out) {
+     DictionaryQuery::read_form_of(row, pins, out);
+   }
++#ifdef HOSHIDICTS_YOMITAN
++  // The files of the loaded dictionaries of a kind, in load order, for
++  // Yomitan's host, which reads their records itself.
++  static std::vector<DictionaryFiles> dictionaries(const DictionaryQuery& query, DictionaryKind kind);
++  // The glossary of `size` bytes at `offset` of a term dictionary's blobs.
++  static std::string decompress_glossary(const DictionaryFiles& dict, uint64_t offset, uint32_t size,
++                                         BlobPins& pins);
++#endif
+ };
 diff --git a/src/zip/zip.cpp b/src/zip/zip.cpp
 index 0fd7043..431153a 100644
 --- a/src/zip/zip.cpp

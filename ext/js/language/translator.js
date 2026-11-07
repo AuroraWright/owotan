@@ -409,7 +409,7 @@ export class Translator {
 
         for (const deinflection of deinflections) {
             // An entry whose definitions are all deinflections was followed above, and is not a result itself.
-            deinflection.databaseEntries = deinflection.databaseEntries.filter((entry) => entry.deferredDefinitionCount > 0);
+            deinflection.databaseEntries = deinflection.databaseEntries.filter((entry) => entry.hasDeferredDefinitions);
         }
         deinflections = deinflections.filter((deinflection) => deinflection.databaseEntries.length);
 

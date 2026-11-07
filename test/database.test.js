@@ -309,9 +309,9 @@ describe('Database', () => {
             // Term rows hold only their deinflection definitions; the glossaries hold every definition.
             expect.soft(glossaries.length).toStrictEqual(termEntries.length + 1);
             for (let i = 0; i < termEntries.length; ++i) {
-                const {definitions, deferredDefinitionCount} = termEntries[i];
+                const {definitions, hasDeferredDefinitions} = termEntries[i];
                 expect.soft(glossaries[i].filter((glossary) => Array.isArray(glossary))).toStrictEqual(definitions);
-                expect.soft(glossaries[i].filter((glossary) => !Array.isArray(glossary)).length).toStrictEqual(deferredDefinitionCount);
+                expect.soft(glossaries[i].some((glossary) => !Array.isArray(glossary))).toStrictEqual(hasDeferredDefinitions);
             }
             expect.soft(glossaries[0]).toContain('da definition 1');
             expect.soft(glossaries[termEntries.length]).toStrictEqual([]);

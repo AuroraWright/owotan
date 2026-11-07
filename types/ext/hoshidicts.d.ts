@@ -84,8 +84,8 @@ export type TermRow = {
     term_tags: string;
     score: number;
     redirects: TermRedirect[];
-    /** The number of glossary items other than redirects. */
-    content_count: number;
+    /** Whether the glossary has an item that is not a redirect, which Yomitan shows. */
+    has_definitions: boolean;
     sequence: number;
     /** Identifies the row within its dictionary. */
     offset: number;

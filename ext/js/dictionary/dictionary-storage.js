@@ -28,7 +28,7 @@ const RECORD_FILE_NAME = 'yomitan.json';
  * The files hoshidicts may write when it imports a dictionary. The origin private file system only opens
  * files asynchronously and hoshidicts creates them synchronously, so they are opened before it starts.
  */
-const IMPORT_FILE_NAMES = ['blobs.bin', 'hash.table', 'bloom.filter', 'scan.idx', 'dict.zstd', 'media.bin', 'media.idx', 'index.json', '.hoshidicts_7'];
+const IMPORT_FILE_NAMES = ['blobs.bin', 'hash.table', 'bloom.filter', 'scan.idx', 'dict.zstd', 'media.bin', 'media.idx', 'index.json', '.hoshidicts_5', '.hoshidicts_6', '.hoshidicts_yomitan_1'];
 /**
  * The files hoshidicts reads only parts of as it looks things up. The others it reads whole when a dictionary is
  * added.

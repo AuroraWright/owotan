@@ -47,8 +47,8 @@ export type TermEntry = {
     rules: string[];
     /** The deinflection definitions. The others are loaded with `findTermGlossariesBulk`. */
     definitions: DictionaryData.TermGlossaryDeinflection[];
-    /** The number of the definitions that are not deinflection definitions. */
-    deferredDefinitionCount: number;
+    /** Whether there are definitions that are not deinflection definitions. */
+    hasDeferredDefinitions: boolean;
     score: number;
     dictionary: string;
     id: number;

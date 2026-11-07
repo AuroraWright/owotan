@@ -610,7 +610,7 @@ export class DictionaryDatabaseEngine {
             termTags: splitField(row.term_tags),
             rules: splitField(row.rules),
             definitions: row.redirects.map(({form_of: formOf, rules}) => [formOf, rules]),
-            deferredDefinitionCount: row.content_count,
+            hasDeferredDefinitions: row.has_definitions,
             score: row.score,
             dictionary: row.dict_name,
             id,
