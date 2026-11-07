@@ -499,7 +499,7 @@ index 1920e45..c57f776 100644
  
      std::ofstream sui(dict_path / (zstd_dict.empty() ? ".hoshidicts_5" : ".hoshidicts_6"), std::ios::binary);
 +#ifdef HOSHIDICTS_YOMITAN
-+    // The term records' fields for Yomitan's host, which DictionaryQuery::query_rows reads.
++    // The term records hold the fields for Yomitan's host, which reads them through QueryAccess.
 +    std::ofstream yomitan_marker(dict_path / ".hoshidicts_yomitan_1", std::ios::binary);
 +#endif
      result.success = true;
