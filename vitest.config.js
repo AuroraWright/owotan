@@ -23,6 +23,7 @@ export default defineConfig({
     test: {
         exclude: [
             ...configDefaults.exclude,
+            'builds/**',
             'dev/lib/**',
             'test/playwright/**',
             'test/json.test.js',
