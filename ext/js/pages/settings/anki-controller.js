@@ -595,7 +595,7 @@ export class AnkiController {
         if (info === null) { return 'AnkiMobile'; }
         const deckCount = info.deckNames.length;
         const modelCount = info.models.length;
-        const source = info.source === 'sync-server' ? 'the copy of the collection' : 'AnkiMobile';
+        const source = info.source === 'sync-server' ? 'the sync server' : 'AnkiMobile';
         return `${deckCount} ${deckCount === 1 ? 'deck' : 'decks'} and ${modelCount} ${modelCount === 1 ? 'note type' : 'note types'} from ${source}`;
     }
 
