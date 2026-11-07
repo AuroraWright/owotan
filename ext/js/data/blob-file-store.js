@@ -50,6 +50,18 @@ export class BlobFileStore {
     }
 
     /**
+     * Gets several entries in one transaction.
+     * @param {string[]} ids
+     * @returns {Promise<(?import('blob-file-store').Entry<TRecord>)[]>} The entries, in the order of `ids`, with
+     *   `null` for each that is missing.
+     */
+    async getMany(ids) {
+        if (ids.length === 0) { return []; }
+        const results = await this._runMany('readonly', (store) => ids.map((id) => store.get(id)));
+        return results.map((result) => result ?? null);
+    }
+
+    /**
      * Stores an entry, replacing the one with its id. The files are written by when this resolves.
      * @param {import('blob-file-store').Entry<TRecord>} entry
      */
@@ -73,12 +85,23 @@ export class BlobFileStore {
      * @returns {Promise<TResult>} The request's result, once its transaction completes.
      */
     async _run(mode, createRequest) {
+        const [result] = await this._runMany(mode, (store) => [createRequest(store)]);
+        return result;
+    }
+
+    /**
+     * @template TResult
+     * @param {IDBTransactionMode} mode
+     * @param {(store: IDBObjectStore) => IDBRequest<TResult>[]} createRequests
+     * @returns {Promise<TResult[]>} The requests' results, once their transaction completes.
+     */
+    async _runMany(mode, createRequests) {
         const database = await this._getDatabase();
         return await new Promise((resolve, reject) => {
             const transaction = database.transaction(STORE_NAME, mode);
-            const request = createRequest(transaction.objectStore(STORE_NAME));
-            transaction.addEventListener('complete', () => resolve(request.result));
-            transaction.addEventListener('error', () => reject(transaction.error ?? request.error));
+            const requests = createRequests(transaction.objectStore(STORE_NAME));
+            transaction.addEventListener('complete', () => resolve(requests.map((request) => request.result)));
+            transaction.addEventListener('error', () => reject(transaction.error ?? requests.find((request) => request.error !== null)?.error));
             transaction.addEventListener('abort', () => reject(transaction.error ?? new Error('Transaction aborted')));
         });
     }
@@ -122,17 +145,21 @@ const MAX_READ_SIZE = 8 * 1024 * 1024;
  *
  * Each read through `FileReaderSync` costs about a millisecond and a half in Safari however little it reads, and
  * opening a dictionary makes dozens of reads of a few bytes, so small reads go through a cache of blocks. The
- * Blobs of stored files never change, so the blocks never go stale.
+ * Blobs of stored files never change, so the blocks never go stale. A handle can also be given the whole content
+ * of its Blob, read with others by `readBlobs`, to read from until it is released.
  */
 export class BlobReadHandle {
     /**
      * @param {Blob} blob
+     * @param {?Uint8Array} [content] The content of `blob`, if it has been read already.
      */
-    constructor(blob) {
+    constructor(blob, content = null) {
         /** @type {Blob} */
         this._blob = blob;
-        /** @type {FileReaderSync} */
-        this._reader = new FileReaderSync();
+        /** @type {?Uint8Array} */
+        this._content = content;
+        /** @type {?FileReaderSync} */
+        this._reader = null;
         /** @type {number} */
         this._id = nextHandleId++;
     }
@@ -152,11 +179,15 @@ export class BlobReadHandle {
     read(buffer, {at}) {
         const end = Math.min(at + buffer.byteLength, this._blob.size);
         if (end <= at) { return 0; }
+        if (this._content !== null) {
+            buffer.set(this._content.subarray(at, end));
+            return end - at;
+        }
         let position = at;
         if (end - at >= BLOCK_SIZE) {
             // In parts, as each read makes a copy, and hoshidicts reads a whole archive at once.
             while (position < end) {
-                const content = new Uint8Array(this._reader.readAsArrayBuffer(this._blob.slice(position, Math.min(position + MAX_READ_SIZE, end))));
+                const content = new Uint8Array(this._getReader().readAsArrayBuffer(this._blob.slice(position, Math.min(position + MAX_READ_SIZE, end))));
                 if (content.byteLength === 0) { break; }
                 buffer.set(content, position - at);
                 position += content.byteLength;
@@ -173,7 +204,22 @@ export class BlobReadHandle {
         return end - at;
     }
 
+    /**
+     * Drops the content the handle was given, so that later reads read the Blob.
+     */
+    release() {
+        this._content = null;
+    }
+
     // Private
+
+    /**
+     * @returns {FileReaderSync}
+     */
+    _getReader() {
+        if (this._reader === null) { this._reader = new FileReaderSync(); }
+        return this._reader;
+    }
 
     /**
      * @param {number} start
@@ -186,7 +232,7 @@ export class BlobReadHandle {
             // Moved to the end, as the most recently used
             cachedBlocks.delete(key);
         } else {
-            block = new Uint8Array(this._reader.readAsArrayBuffer(this._blob.slice(start, Math.min(start + BLOCK_SIZE, this._blob.size))));
+            block = new Uint8Array(this._getReader().readAsArrayBuffer(this._blob.slice(start, Math.min(start + BLOCK_SIZE, this._blob.size))));
             if (cachedBlocks.size >= MAX_CACHED_BLOCKS) {
                 cachedBlocks.delete(/** @type {string} */ (cachedBlocks.keys().next().value));
             }
@@ -194,6 +240,41 @@ export class BlobReadHandle {
         cachedBlocks.set(key, block);
         return block;
     }
+}
+
+/**
+ * Reads several Blobs whole, a few at a time in one `FileReaderSync` read of a Blob of them, which is many times
+ * faster in Safari than reading each, as each read costs about a millisecond and a half however little it reads.
+ * Only works in a worker.
+ * @param {Blob[]} blobs
+ * @returns {Uint8Array[]} The content of each Blob, in order. Those read together share a buffer, which is kept
+ *   while any of them is.
+ * @throws {Error} If the Blobs could not be read whole.
+ */
+export function readBlobs(blobs) {
+    const reader = new FileReaderSync();
+    /** @type {Uint8Array[]} */
+    const results = [];
+    let start = 0;
+    while (start < blobs.length) {
+        // Up to MAX_READ_SIZE at once, or one larger Blob
+        let end = start + 1;
+        let size = blobs[start].size;
+        while (end < blobs.length && size + blobs[end].size <= MAX_READ_SIZE) {
+            size += blobs[end].size;
+            ++end;
+        }
+        const content = new Uint8Array(reader.readAsArrayBuffer(new Blob(blobs.slice(start, end))));
+        if (content.byteLength !== size) { throw new Error('Could not read the whole content of the files'); }
+        let position = 0;
+        for (let i = start; i < end; ++i) {
+            const blobSize = blobs[i].size;
+            results.push(content.subarray(position, position + blobSize));
+            position += blobSize;
+        }
+        start = end;
+    }
+    return results;
 }
 
 /** @type {number} */

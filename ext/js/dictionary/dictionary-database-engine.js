@@ -514,19 +514,34 @@ export class DictionaryDatabaseEngine {
         for (const id of this._mounted.keys()) {
             if (!ids.has(id)) { this._unmount(id); }
         }
-        for (const {id, record} of this._dictionaries) {
-            if (this._mounted.has(id)) { continue; }
-            const path = `${MOUNT_DIRECTORY}/${id}`;
-            try {
-                const mount = await this._storage.mount(hoshidicts, id, path);
-                mount();
-                this._mounted.set(id, path);
-                if (!hoshidicts.add(path)) {
-                    throw new Error('hoshidicts could not open it');
+        const dictionaries = this._dictionaries
+            .filter(({id}) => !this._mounted.has(id))
+            .map(({id, record}) => ({id, record, path: `${MOUNT_DIRECTORY}/${id}`}));
+        /** @type {import('dictionary-database').DictionaryMounts} */
+        let dictionaryMounts;
+        try {
+            dictionaryMounts = await this._storage.mount(hoshidicts, dictionaries);
+        } catch (e) {
+            // Tried again the next time they are needed
+            log.error(new Error(`Could not load the dictionaries: ${e instanceof Error ? e.message : `${e}`}`));
+            return;
+        }
+        const {mounts, release} = dictionaryMounts;
+        try {
+            for (let i = 0; i < dictionaries.length; ++i) {
+                const {id, record, path} = dictionaries[i];
+                try {
+                    mounts[i]();
+                    this._mounted.set(id, path);
+                    if (!hoshidicts.add(path)) {
+                        throw new Error('hoshidicts could not open it');
+                    }
+                } catch (e) {
+                    log.error(new Error(`Could not load dictionary ${record.summary.title}: ${e instanceof Error ? e.message : `${e}`}`));
                 }
-            } catch (e) {
-                log.error(new Error(`Could not load dictionary ${record.summary.title}: ${e instanceof Error ? e.message : `${e}`}`));
             }
+        } finally {
+            release();
         }
         this._mountStale = false;
     }

@@ -201,12 +201,26 @@ export interface DictionaryStorage {
     addDictionary(id: string, hoshidicts: Hoshidicts, path: string, write: () => Promise<DictionaryRecord>): Promise<DictionaryRecord>;
     deleteDictionary(id: string): Promise<void>;
     /**
-     * Opens what mounting a dictionary needs and returns a function that mounts it at `path` in the
-     * engine's file system.
+     * Opens what mounting some dictionaries needs, each at its `path` in the engine's file system.
      */
-    mount(hoshidicts: Hoshidicts, id: string, path: string): Promise<() => void>;
+    mount(hoshidicts: Hoshidicts, dictionaries: DictionaryMountTarget[]): Promise<DictionaryMounts>;
     unmount(hoshidicts: Hoshidicts, path: string): void;
 }
+
+export type DictionaryMountTarget = {
+    id: string;
+    path: string;
+};
+
+/** What `DictionaryStorage.mount` opened. */
+export type DictionaryMounts = {
+    /**
+     * For each dictionary, in order, a function that mounts it, or that throws why it could not be opened.
+     */
+    mounts: (() => void)[];
+    /** Drops what was read ahead for the dictionaries, once they have been added to hoshidicts. */
+    release: () => void;
+};
 
 /** A stored dictionary as the engine has it. */
 export type EngineDictionary = {
