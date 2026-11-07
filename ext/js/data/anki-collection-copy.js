@@ -26,7 +26,8 @@ const DATABASE_VERSION = 1;
 const LOCK_NAME = 'anki-collection-copy';
 
 /**
- * How long a note added through AnkiMobile counts as a duplicate without the copy having it, in milliseconds.
+ * How long a note added through AnkiMobile counts as a duplicate without the copy having it, in milliseconds, if no
+ * sync shows that the collection does not have it.
  */
 const PENDING_NOTE_LIFETIME = 7 * 24 * 60 * 60 * 1000;
 
@@ -137,6 +138,7 @@ export class AnkiCollectionCopy {
                 await this._write(['state'], (transaction) => {
                     transaction.objectStore('state').put({name: 'sync', value: {...sync, updatedAt: now}});
                 });
+                await this._prunePendingNotes(meta.mod);
                 return true;
             }
             if (full) {
@@ -148,7 +150,7 @@ export class AnkiCollectionCopy {
             await this._write(['state'], (transaction) => {
                 transaction.objectStore('state').put({name: 'sync', value: newSync});
             });
-            await this._prunePendingNotes();
+            await this._prunePendingNotes(meta.mod);
             return true;
         }) ?? false;
     }
@@ -198,8 +200,10 @@ export class AnkiCollectionCopy {
      *   Null if the copy has never been updated.
      */
     async findDuplicates(notes) {
-        const {sync, pendingNotes} = await this._getState();
+        const {sync, pendingNotes: allPendingNotes} = await this._getState();
         if (sync === null) { return null; }
+        const now = Date.now();
+        const pendingNotes = allPendingNotes.filter(({addedAt}) => now - addedAt <= PENDING_NOTE_LIFETIME);
         const [notetypeList, deckList] = await this._read(['notetypes', 'decks'], (transaction) => [
             transaction.objectStore('notetypes').getAll(),
             transaction.objectStore('decks').getAll(),
@@ -329,9 +333,12 @@ export class AnkiCollectionCopy {
     }
 
     /**
-     * Drops the pending notes that the copy has now, and the old ones.
+     * Drops the pending notes that the copy has now, and the old ones. It also drops those that the copy does not have
+     * although a sync changed the collection after they were added, since AnkiMobile synced after deleting them.
+     * The sync could also have been another device's, and then a note does not count until AnkiMobile syncs it.
+     * @param {number} collectionModified When a sync last changed the collection, by the server's clock.
      */
-    async _prunePendingNotes() {
+    async _prunePendingNotes(collectionModified) {
         const {pendingNotes} = await this._getState();
         if (pendingNotes.length === 0) { return; }
         const [notetypeList] = await this._read(['notetypes'], (transaction) => [transaction.objectStore('notetypes').getAll()]);
@@ -342,7 +349,7 @@ export class AnkiCollectionCopy {
         }));
         const now = Date.now();
         const remaining = pendingNotes.filter((pendingNote, i) => {
-            if (now - pendingNote.addedAt > PENDING_NOTE_LIFETIME) { return false; }
+            if (now - pendingNote.addedAt > PENDING_NOTE_LIFETIME || pendingNote.addedAt < collectionModified) { return false; }
             const notetypeId = notetypeIds.get(pendingNote.modelName.toLowerCase());
             return !candidateLists[i].some((candidate) => candidate.notetypeId === notetypeId);
         });
