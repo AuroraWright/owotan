@@ -26,6 +26,7 @@ import {arrayBufferUtf8Decode} from '../../data/array-buffer-util.js';
 import {OptionsUtil} from '../../data/options-util.js';
 import {getAllPermissions} from '../../data/permissions-util.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
+import {shareFile} from '../../dom/share-file.js';
 import {DictionaryController} from './dictionary-controller.js';
 
 export class BackupController {
@@ -52,6 +53,8 @@ export class BackupController {
         this._settingsImportWarningModal = null;
         /** @type {?OptionsUtil} */
         this._optionsUtil = null;
+        /** @type {boolean} */
+        this._shareFiles = false;
 
         try {
             this._optionsUtil = new OptionsUtil();
@@ -68,6 +71,10 @@ export class BackupController {
         if (this._optionsUtil !== null) {
             await this._optionsUtil.prepare();
         }
+
+        const {platform} = await this._settingsController.application.api.getEnvironmentInfo();
+        // Safari on iOS cannot download files from extension pages
+        this._shareFiles = platform.os === 'ios';
 
         if (this._modalController !== null) {
             this._settingsResetModal = this._modalController.getModal('settings-reset');
@@ -163,6 +170,11 @@ export class BackupController {
             // @ts-expect-error - call for legacy Edge
             navigator.msSaveBlob(blob)
         ) {
+            return;
+        }
+
+        if (this._shareFiles) {
+            void shareFile(blob, fileName).catch((e) => { log.error(e); });
             return;
         }
 

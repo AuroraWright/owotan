@@ -21,6 +21,7 @@ import {toError} from '../../core/to-error.js';
 import {AnkiNoteBuilder} from '../../data/anki-note-builder.js';
 import {getDynamicTemplates} from '../../data/anki-template-util.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
+import {shareFile} from '../../dom/share-file.js';
 import {getLanguageSummaries} from '../../language/languages.js';
 import {getRequiredAudioSources} from '../../media/audio-downloader.js';
 import {TemplateRendererProxy} from '../../templates/template-renderer-proxy.js';
@@ -43,6 +44,8 @@ export class AnkiDeckGeneratorController {
         this._ankiController = ankiController;
         /** @type {?string} */
         this._defaultFieldTemplates = null;
+        /** @type {boolean} */
+        this._shareFiles = false;
         /** @type {HTMLTextAreaElement} */
         this._mainSettingsEntry = querySelectorNotNull(document, '#generate-anki-notes-main-settings-entry');
         /** @type {HTMLTextAreaElement} */
@@ -92,6 +95,9 @@ export class AnkiDeckGeneratorController {
     /** */
     async prepare() {
         this._defaultFieldTemplates = await this._settingsController.application.api.getDefaultAnkiFieldTemplates();
+        const {platform} = await this._settingsController.application.api.getEnvironmentInfo();
+        // Safari on iOS cannot download files from extension pages
+        this._shareFiles = platform.os === 'ios';
 
         /** @type {HTMLButtonElement} */
         const parseWordsButton = querySelectorNotNull(document, '#generate-anki-notes-parse-button');
@@ -610,6 +616,11 @@ export class AnkiDeckGeneratorController {
             // @ts-expect-error - call for legacy Edge
             navigator.msSaveBlob(blob)
         ) {
+            return;
+        }
+
+        if (this._shareFiles) {
+            void shareFile(blob, fileName).catch((e) => { log.error(e); });
             return;
         }
 
