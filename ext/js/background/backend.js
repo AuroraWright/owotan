@@ -78,7 +78,7 @@ export class Backend {
         /** @type {AnkiConnect} */
         this._anki = new AnkiConnect();
         /** @type {AnkiMobile} */
-        this._ankiMobile = new AnkiMobile();
+        this._ankiMobile = new AnkiMobile((files) => this._getAnkiCollectionCopy().uploadMediaFiles(files));
         /** @type {import('settings').AnkiConnection} */
         this._ankiConnection = 'ankiconnect';
         /** @type {boolean} */

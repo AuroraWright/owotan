@@ -16,9 +16,18 @@
  */
 
 import {decompress} from '../../lib/fzstd.js';
+import {
+    Uint8ArrayReader as Uint8ArrayReader0,
+    Uint8ArrayWriter as Uint8ArrayWriter0,
+    ZipWriter as ZipWriter0,
+} from '../../lib/zip.js';
 import {parseJson} from '../core/json.js';
 import {isObjectNotArray} from '../core/object-utilities.js';
 import {generateId} from '../core/utilities.js';
+
+const Uint8ArrayReader = /** @type {typeof import('@zip.js/zip.js').Uint8ArrayReader} */ (/** @type {unknown} */ (Uint8ArrayReader0));
+const Uint8ArrayWriter = /** @type {typeof import('@zip.js/zip.js').Uint8ArrayWriter} */ (/** @type {unknown} */ (Uint8ArrayWriter0));
+const ZipWriter = /** @type {typeof import('@zip.js/zip.js').ZipWriter} */ (/** @type {unknown} */ (ZipWriter0));
 
 /**
  * The version of the sync protocol that Anki 2.1.57 and newer use.
@@ -36,6 +45,11 @@ const ANKI_BUILD_HASH = 'c06370ff';
  */
 const ZSTD_MAX_BLOCK_SIZE = 128 * 1024;
 
+/**
+ * The most media files that a server takes in one upload (MAX_MEDIA_FILES_IN_ZIP in Anki's source).
+ */
+export const MAX_MEDIA_FILES_PER_UPLOAD = 25;
+
 export class AnkiSyncError extends Error {
     /**
      * @param {string} message
@@ -52,7 +66,7 @@ export class AnkiSyncError extends Error {
 
 /**
  * A client of the protocol that Anki syncs collections with (rslib/src/sync in Anki's source). It only reads a collection: a sync it starts is always aborted, which drops what the
- * server would have changed.
+ * server would have changed. It can add files to the collection's media, which Anki's clients download when they sync.
  */
 export class AnkiSyncClient {
     /**
@@ -99,7 +113,7 @@ export class AnkiSyncClient {
      * @returns {Promise<import('anki-sync').Meta>}
      */
     async meta() {
-        const result = await this._request('meta', {v: SYNC_VERSION, cv: `anki,${ANKI_VERSION} (${ANKI_BUILD_HASH}),${this._platform}`});
+        const result = await this._request('meta', {v: SYNC_VERSION, cv: this._getClientVersion()});
         if (
             !isObjectNotArray(result) ||
             typeof result.mod !== 'number' ||
@@ -214,7 +228,40 @@ export class AnkiSyncClient {
         await this._request('abort', {});
     }
 
+    /**
+     * Starts a media sync, as Anki does before it sends media files.
+     * @returns {Promise<number>} The number of the server's last change to the media.
+     * @throws {AnkiSyncError}
+     */
+    async beginMediaSync() {
+        const result = await this._requestMedia('begin', new TextEncoder().encode(JSON.stringify({v: this._getClientVersion()})));
+        if (!isObjectNotArray(result) || typeof result.usn !== 'number') {
+            throw new AnkiSyncError('The sync server did not start a media sync', 200);
+        }
+        return result.usn;
+    }
+
+    /**
+     * Adds files to the collection's media, or replaces the files of the same names.
+     * @param {{fileName: string, content: Uint8Array}[]} files At most `MAX_MEDIA_FILES_PER_UPLOAD`, whose names are in NFC.
+     * @throws {AnkiSyncError}
+     */
+    async uploadMediaFiles(files) {
+        const result = await this._requestMedia('uploadChanges', await createMediaUploadZip(files));
+        // [processed, current_usn]
+        if (!Array.isArray(result) || result[0] !== files.length) {
+            throw new AnkiSyncError('The sync server did not take all the media files', 200);
+        }
+    }
+
     // Private
+
+    /**
+     * @returns {string} The version of Anki's client, as Anki gives it.
+     */
+    _getClientVersion() {
+        return `anki,${ANKI_VERSION} (${ANKI_BUILD_HASH}),${this._platform}`;
+    }
 
     /**
      * @param {string} method
@@ -223,27 +270,54 @@ export class AnkiSyncClient {
      * @throws {AnkiSyncError}
      */
     async _request(method, data) {
-        const response = await this._fetch(method, data);
+        return await this._send(`sync/${method}`, new TextEncoder().encode(JSON.stringify(data)));
+    }
+
+    /**
+     * @param {string} method
+     * @param {Uint8Array} body
+     * @returns {Promise<unknown>} What the method returns, which the server wraps with an error message.
+     * @throws {AnkiSyncError}
+     */
+    async _requestMedia(method, body) {
+        const result = await this._send(`msync/${method}`, body);
+        if (!isObjectNotArray(result)) {
+            throw new AnkiSyncError('The sync server sent a media response that cannot be read', 200);
+        }
+        if (typeof result.err === 'string' && result.err.length > 0) {
+            throw new AnkiSyncError(`The sync server answered with the error: ${result.err}`, 200);
+        }
+        return result.data;
+    }
+
+    /**
+     * @param {string} path
+     * @param {Uint8Array} body
+     * @returns {Promise<unknown>}
+     * @throws {AnkiSyncError}
+     */
+    async _send(path, body) {
+        const response = await this._fetch(path, body);
         if (response.redirected) {
             // A server can move an account to another server with a permanent redirect to that server's own URL,
             // which is the endpoint from then on. Browsers follow it, but they do not show where it led before that.
-            this._endpoint = new URL(response.url.replace(/sync\/[^/]*$/, '')).href;
-            return await this._getResponseData(await this._fetch(method, data));
+            this._endpoint = new URL(response.url.replace(/m?sync\/[^/]*$/, '')).href;
+            return await this._getResponseData(await this._fetch(path, body));
         }
         return await this._getResponseData(response);
     }
 
     /**
-     * @param {string} method
-     * @param {unknown} data
+     * @param {string} path
+     * @param {Uint8Array} data
      * @returns {Promise<Response>}
      * @throws {AnkiSyncError}
      */
-    async _fetch(method, data) {
+    async _fetch(path, data) {
         const header = {v: SYNC_VERSION, k: this._hostKey, c: `${ANKI_VERSION},${ANKI_BUILD_HASH},${this._platform}`, s: this._sessionKey};
-        const body = encodeZstdFrame(new TextEncoder().encode(JSON.stringify(data)));
+        const body = encodeZstdFrame(data);
         try {
-            return await fetch(new URL(`sync/${method}`, this._endpoint), {
+            return await fetch(new URL(path, this._endpoint), {
                 method: 'POST',
                 headers: {'anki-sync': JSON.stringify(header)},
                 body,
@@ -311,6 +385,27 @@ export function getAnkiPlatformName(os) {
         case 'android': return 'android';
         default: return 'linux';
     }
+}
+
+/**
+ * Puts media files in a zip as Anki uploads them: each file is stored under its index, and `_meta` lists each file's
+ * name with the name of its entry (rslib/src/sync/media/zip.rs).
+ * @param {{fileName: string, content: Uint8Array}[]} files
+ * @returns {Promise<Uint8Array>}
+ */
+async function createMediaUploadZip(files) {
+    const zipWriter = new ZipWriter(new Uint8ArrayWriter(), {level: 0});
+    // Stored entries need no compression in a worker
+    const options = {useWebWorkers: false};
+    /** @type {[fileName: string, entryName: string][]} */
+    const entries = [];
+    for (let i = 0; i < files.length; ++i) {
+        const {fileName, content} = files[i];
+        await zipWriter.add(`${i}`, new Uint8ArrayReader(content), options);
+        entries.push([fileName, `${i}`]);
+    }
+    await zipWriter.add('_meta', new Uint8ArrayReader(new TextEncoder().encode(JSON.stringify(entries))), options);
+    return await zipWriter.close();
 }
 
 /**

@@ -15,6 +15,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {log} from '../core/log.js';
+import {base64ToArrayBuffer} from '../data/array-buffer-util.js';
 import {getFileNameExtension, getImageMediaTypeFromFileName} from '../media/media-util.js';
 
 /**
@@ -35,25 +37,39 @@ export const ANKI_MOBILE_ADDED_HASH_PREFIX = '#yomitan-anki-added-';
 /**
  * Builds the links of AnkiMobile's URL scheme (https://docs.ankimobile.net/url-schemes.html), which is the only
  * way to add notes to Anki on iOS. AnkiMobile adds a note silently, and it opens the link given as `x-success`
- * when it has added it. It cannot store media files, but it turns a field that is nothing but a `data:` URL
- * into a media file, so media are sent that way. Images next to other content, such as a glossary's, and images
- * of the types that it does not turn into files, such as SVG, are kept in the field as `data:` URLs, which cards
- * show.
+ * when it has added it. It cannot store media files, so they are added to the sync server that it syncs with, if
+ * Yomitan logged in to it, as Anki would add them, and AnkiMobile gets them when it syncs. Otherwise media are
+ * sent in the note: AnkiMobile turns a field that is nothing but a `data:` URL into a media file, and images next
+ * to other content, such as a glossary's, and images of the types that it does not turn into files, such as SVG,
+ * are kept in the field as `data:` URLs, which cards show.
  */
 export class AnkiMobile {
-    constructor() {
+    /**
+     * @param {?(files: {fileName: string, content: Uint8Array}[]) => Promise<boolean>} [uploadMediaFiles]
+     *   Adds media files to the sync server that AnkiMobile syncs with, and tells whether it did, which it does not
+     *   if Yomitan is not logged in to one.
+     */
+    constructor(uploadMediaFiles = null) {
+        /** @type {?(files: {fileName: string, content: Uint8Array}[]) => Promise<boolean>} */
+        this._uploadMediaFiles = uploadMediaFiles;
         /** @type {Map<string, string>} */
         this._media = new Map();
     }
 
     /**
-     * Keeps a media file to send with the note that uses it, as AnkiConnect would store it.
+     * Adds a media file to the sync server, or keeps it to send with the note that uses it, as AnkiConnect would
+     * store it.
      * @param {string} fileName
      * @param {string} content The file's content, encoded with base64.
      * @returns {Promise<string>} The file name, which the note's fields use.
-     * @throws {Error} If the file's type is not known.
+     * @throws {Error} If the file was not added to a sync server, and its type is not known.
      */
     async storeMediaFile(fileName, content) {
+        const ankiFileName = getAnkiMediaFileName(fileName);
+        if (await this._uploadMediaFile(ankiFileName, content)) {
+            this._media.delete(ankiFileName);
+            return ankiFileName;
+        }
         const mediaType = getMediaTypeFromFileName(fileName);
         if (mediaType === null) {
             throw new Error(`AnkiMobile cannot add media of the type of ${fileName}`);
@@ -116,6 +132,22 @@ export class AnkiMobile {
     // Private
 
     /**
+     * @param {string} fileName
+     * @param {string} content The file's content, encoded with base64.
+     * @returns {Promise<boolean>} Whether the file was added to the sync server.
+     */
+    async _uploadMediaFile(fileName, content) {
+        if (this._uploadMediaFiles === null) { return false; }
+        try {
+            return await this._uploadMediaFiles([{fileName, content: new Uint8Array(base64ToArrayBuffer(content))}]);
+        } catch (e) {
+            // The note can still have the file
+            log.warn(e);
+            return false;
+        }
+    }
+
+    /**
      * @param {string} name
      * @param {string} value
      * @returns {string}
@@ -140,6 +172,22 @@ export class AnkiMobile {
         }
         return result;
     }
+}
+
+/**
+ * Changes a file name as Anki does when AnkiConnect adds a file (normalize_filename and add_data_to_folder_uniquely
+ * in rslib/src/media/files.rs), apart from the rules for names that Yomitan does not make: longer than 120 bytes, or
+ * that are Windows device names or end with a space or a dot.
+ * @param {string} fileName
+ * @returns {string}
+ */
+function getAnkiMediaFileName(fileName) {
+    return fileName
+        .normalize('NFC')
+        // eslint-disable-next-line no-control-regex
+        .replace(/[[\]<>:"/?*^\\|\u0000-\u001f\u007f\p{Cn}]/gu, '')
+        .replaceAll('\u00a0', ' ')
+        .toLowerCase();
 }
 
 /**

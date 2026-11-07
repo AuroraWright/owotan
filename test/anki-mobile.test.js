@@ -84,6 +84,43 @@ describe('AnkiMobile', () => {
         });
     });
 
+    test('leaves media in fields as files once they are added to the sync server', async () => {
+        /** @type {{fileName: string, content: Uint8Array}[]} */
+        const uploaded = [];
+        const ankiMobile = new AnkiMobile(async (files) => {
+            uploaded.push(...files);
+            return true;
+        });
+        expect(await ankiMobile.storeMediaFile('Yomitan_Audio_1.MP3', 'AAAA')).toBe('yomitan_audio_1.mp3');
+        expect(await ankiMobile.storeMediaFile('yomitan_dictionary_media_1.svg', 'CCCC')).toBe('yomitan_dictionary_media_1.svg');
+        expect(uploaded).toStrictEqual([
+            {fileName: 'yomitan_audio_1.mp3', content: new Uint8Array([0, 0, 0])},
+            {fileName: 'yomitan_dictionary_media_1.svg', content: new Uint8Array([8, 32, 130])},
+        ]);
+        const fields = {Audio: 'to read [sound:yomitan_audio_1.mp3]', Glossary: '<img src="yomitan_dictionary_media_1.svg">'};
+        expect(getFields(ankiMobile, fields)).toStrictEqual(fields);
+    });
+
+    test('names files as Anki does when it adds them', async () => {
+        /** @type {string[]} */
+        const fileNames = [];
+        const ankiMobile = new AnkiMobile(async (files) => {
+            fileNames.push(...files.map(({fileName}) => fileName));
+            return true;
+        });
+        await ankiMobile.storeMediaFile('a[b]c<d>e:f"g?h*i^j\\k|l\u0001m\u00a0n.PNG', 'AAAA');
+        await ankiMobile.storeMediaFile('e\u0301.png', 'AAAA');
+        expect(fileNames).toStrictEqual(['abcdefghijklm n.png', '\u00e9.png']);
+    });
+
+    test('sends media in the note if the sync server does not take them', async () => {
+        const ankiMobile = new AnkiMobile(async () => {
+            throw new Error('Cannot connect to the sync server');
+        });
+        expect(await ankiMobile.storeMediaFile('screenshot.png', 'BBBB')).toBe('screenshot.png');
+        expect(getFields(ankiMobile, {Image: '<img src="screenshot.png">'})).toStrictEqual({Image: 'data:image/png;base64,BBBB'});
+    });
+
     test('rejects audio next to other content', async () => {
         const ankiMobile = new AnkiMobile();
         await ankiMobile.storeMediaFile('audio.mp3', 'AAAA');

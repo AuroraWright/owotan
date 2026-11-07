@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {AnkiSyncClient} from '../comm/anki-sync-client.js';
+import {AnkiSyncClient, MAX_MEDIA_FILES_PER_UPLOAD} from '../comm/anki-sync-client.js';
 
 const DATABASE_NAME = 'anki-collection-copy';
 const DATABASE_VERSION = 1;
@@ -126,11 +126,7 @@ export class AnkiCollectionCopy {
 
             const client = new AnkiSyncClient(login.endpoint, login.hostKey, this._platform);
             const meta = await client.meta();
-            if (client.endpoint !== login.endpoint) {
-                await this._write(['state'], (transaction) => {
-                    transaction.objectStore('state').put({name: 'login', value: {...login, endpoint: client.endpoint}});
-                });
-            }
+            await this._keepEndpoint(login, client);
             if (!meta.cont) {
                 throw new Error(meta.msg.length > 0 ? meta.msg : 'The sync server does not allow syncing');
             }
@@ -155,6 +151,24 @@ export class AnkiCollectionCopy {
             await this._prunePendingNotes();
             return true;
         }) ?? false;
+    }
+
+    /**
+     * Adds files to the collection's media on the sync server, as Anki does, from which Anki's clients download them
+     * when they sync.
+     * @param {{fileName: string, content: Uint8Array}[]} files Their names are in NFC, as Anki keeps them.
+     * @returns {Promise<boolean>} Whether they were added, which they are not if no login is kept.
+     */
+    async uploadMediaFiles(files) {
+        const {login} = await this._getState();
+        if (login === null) { return false; }
+        const client = new AnkiSyncClient(login.endpoint, login.hostKey, this._platform);
+        await client.beginMediaSync();
+        await this._keepEndpoint(login, client);
+        for (let i = 0; i < files.length; i += MAX_MEDIA_FILES_PER_UPLOAD) {
+            await client.uploadMediaFiles(files.slice(i, i + MAX_MEDIA_FILES_PER_UPLOAD));
+        }
+        return true;
     }
 
     /**
@@ -353,6 +367,18 @@ export class AnkiCollectionCopy {
             }
         }
         return state;
+    }
+
+    /**
+     * Keeps the endpoint that the server redirected the client to.
+     * @param {import('anki-sync').Login} login
+     * @param {AnkiSyncClient} client
+     */
+    async _keepEndpoint(login, client) {
+        if (client.endpoint === login.endpoint) { return; }
+        await this._write(['state'], (transaction) => {
+            transaction.objectStore('state').put({name: 'login', value: {...login, endpoint: client.endpoint}});
+        });
     }
 
     /**
