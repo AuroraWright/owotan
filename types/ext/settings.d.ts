@@ -56,13 +56,20 @@ export type OptionsContext = OptionsContext1 | OptionsContext2 | OptionsContext3
 
 export type Options = {
     version: number;
+    /** The version of the settings that this fork adds, which are updated separately from Yomitan's. */
+    forkVersion: number;
     profiles: Profile[];
     profileCurrent: number;
     global: GlobalOptions;
 };
 
 export type GlobalOptions = {
+    database: GlobalDatabaseOptions;
     dataTransmissionConsentShown: boolean;
+};
+
+export type GlobalDatabaseOptions = {
+    prefixWildcardsSupported: boolean;
 };
 
 export type Profile = {
@@ -199,6 +206,7 @@ export type ScanningOptions = {
     enableOnSearchPage: boolean;
     enableSearchTags: boolean;
     layoutAwareScan: boolean;
+    matchTypePrefix: boolean;
     hidePopupOnCursorExit: boolean;
     hidePopupOnCursorExitDelay: number;
     reducedMotionScrolling: boolean;

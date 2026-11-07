@@ -105,6 +105,9 @@ export class OptionsUtil {
 
         // Generic updates
         options = await this._applyUpdates(options, this._getVersionUpdates(targetVersion));
+        if (targetVersion === null) {
+            options = await this._applyForkUpdates(options);
+        }
 
         // Validation
         return /** @type {import('settings').Options} */ (/** @type {JsonSchema} */ (this._optionsSchema).getValidValueOrDefault(options));
@@ -168,6 +171,7 @@ export class OptionsUtil {
         const optionsVersion = this._getVersionUpdates(null).length;
         const options = /** @type {import('settings').Options} */ (/** @type {JsonSchema} */ (this._optionsSchema).getValidValueOrDefault());
         options.version = optionsVersion;
+        options.forkVersion = this._getForkVersionUpdates().length;
         return options;
     }
 
@@ -589,9 +593,6 @@ export class OptionsUtil {
             this._updateVersion75,
             this._updateVersion76,
             this._updateVersion77,
-            this._updateVersion78,
-            this._updateVersion79,
-            this._updateVersion80,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1864,38 +1865,52 @@ export class OptionsUtil {
     }
 
     /**
-     *  - Removed global.database.prefixWildcardsSupported and scanning.matchTypePrefix, as dictionaries are
-     *    searched for exact matches only.
-     *  @type {import('options-util').UpdateFunction}
+     * Applies the updates for the settings that this fork adds. They're versioned by forkVersion instead of version,
+     * so Yomitan's own updates apply unchanged when they're merged, including to settings saved by this fork.
+     * @param {import('options-util').IntermediateOptions} options
+     * @returns {Promise<import('settings').Options>}
      */
-    async _updateVersion78(options) {
-        delete options.global.database;
-        for (const profile of options.profiles) {
-            delete profile.options.scanning.matchTypePrefix;
+    async _applyForkUpdates(options) {
+        const updates = this._getForkVersionUpdates();
+        let currentVersion = options.forkVersion;
+        if (typeof currentVersion !== 'number' || !Number.isFinite(currentVersion)) {
+            currentVersion = 0;
         }
+
+        for (let i = Math.max(0, Math.floor(currentVersion)); i < updates.length; ++i) {
+            await updates[i].call(this, options);
+        }
+
+        options.forkVersion = updates.length;
+        return options;
+    }
+
+    /**
+     * Fork updates only add the settings that are missing. They don't change or remove Yomitan's settings, which
+     * Yomitan's later updates may read, and settings made by Yomitan, such as imported ones, have no fork version.
+     * @returns {import('options-util').UpdateFunction[]}
+     */
+    _getForkVersionUpdates() {
+        /* eslint-disable @typescript-eslint/unbound-method */
+        return [
+            this._updateForkVersion1,
+        ];
+        /* eslint-enable @typescript-eslint/unbound-method */
     }
 
     /**
      *  - Added audio.sources[].apiKey, for the Forvo audio source.
-     *  @type {import('options-util').UpdateFunction}
-     */
-    async _updateVersion79(options) {
-        for (const profile of options.profiles) {
-            for (const source of profile.options.audio.sources) {
-                source.apiKey = '';
-            }
-        }
-    }
-
-    /**
      *  - Added anki.connection, which can be AnkiMobile on iOS.
      *  - Added anki.syncServer, where the copy of the collection for AnkiMobile is read from.
      *  @type {import('options-util').UpdateFunction}
      */
-    async _updateVersion80(options) {
+    async _updateForkVersion1(options) {
         for (const profile of options.profiles) {
-            profile.options.anki.connection = 'ankiconnect';
-            profile.options.anki.syncServer = '';
+            for (const source of profile.options.audio.sources) {
+                source.apiKey ??= '';
+            }
+            profile.options.anki.connection ??= 'ankiconnect';
+            profile.options.anki.syncServer ??= '';
         }
     }
 

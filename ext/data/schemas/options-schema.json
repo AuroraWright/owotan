@@ -4,12 +4,18 @@
     "type": "object",
     "required": [
         "version",
+        "forkVersion",
         "profiles",
         "profileCurrent",
         "global"
     ],
     "properties": {
         "version": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+        },
+        "forkVersion": {
             "type": "integer",
             "minimum": 0,
             "default": 0
@@ -511,6 +517,7 @@
                                     "enableOnSearchPage",
                                     "enableSearchTags",
                                     "layoutAwareScan",
+                                    "matchTypePrefix",
                                     "hidePopupOnCursorExit",
                                     "hidePopupOnCursorExitDelay",
                                     "reducedMotionScrolling",
@@ -812,6 +819,10 @@
                                     "layoutAwareScan": {
                                         "type": "boolean",
                                         "default": true
+                                    },
+                                    "matchTypePrefix": {
+                                        "type": "boolean",
+                                        "default": false
                                     },
                                     "hidePopupOnCursorExit": {
                                         "type": "boolean",
@@ -1411,9 +1422,22 @@
         "global": {
             "type": "object",
             "required": [
+                "database",
                 "dataTransmissionConsentShown"
             ],
             "properties": {
+                "database": {
+                    "type": "object",
+                    "required": [
+                        "prefixWildcardsSupported"
+                    ],
+                    "properties": {
+                        "prefixWildcardsSupported": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    }
+                },
                 "dataTransmissionConsentShown": {
                     "type": "boolean",
                     "default": false

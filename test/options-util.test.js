@@ -365,6 +365,7 @@ function createProfileOptionsUpdatedTestData1() {
             enableSearchTags: false,
             layoutAwareScan: false,
             hideDelay: 0,
+            matchTypePrefix: false,
             hidePopupOnCursorExit: false,
             hidePopupOnCursorExitDelay: 0,
             reducedMotionScrolling: false,
@@ -712,8 +713,12 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 80,
+        version: 77,
+        forkVersion: 1,
         global: {
+            database: {
+                prefixWildcardsSupported: false,
+            },
             dataTransmissionConsentShown: false,
         },
     };
@@ -762,6 +767,28 @@ describe('OptionsUtil', () => {
         const partialsExpected = getHandlebarsPartials(defaultAnkiFieldTemplates);
 
         expect(partialsUpdated).toStrictEqual(partialsExpected);
+    });
+
+    test('Update settings saved with the fork updates in version', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+
+        // As saved by earlier builds of this fork, which updated version to 80 and removed Yomitan's settings
+        const options = /** @type {import('core').SafeAny} */ (createOptionsUpdatedTestData1());
+        options.version = 80;
+        delete options.forkVersion;
+        delete options.global.database;
+        delete options.profiles[0].options.scanning.matchTypePrefix;
+        options.profiles[0].options.anki.connection = 'ankimobile';
+        options.profiles[0].options.anki.syncServer = 'http://localhost:8080/';
+        options.profiles[0].options.audio.sources[0].apiKey = 'key';
+
+        const optionsUpdated = structuredClone(await optionsUtil.update(options));
+        const optionsExpected = /** @type {import('core').SafeAny} */ (createOptionsUpdatedTestData1());
+        optionsExpected.profiles[0].options.anki.connection = 'ankimobile';
+        optionsExpected.profiles[0].options.anki.syncServer = 'http://localhost:8080/';
+        optionsExpected.profiles[0].options.audio.sources[0].apiKey = 'key';
+        expect(optionsUpdated).toStrictEqual(optionsExpected);
     });
 
     describe('Default', () => {
