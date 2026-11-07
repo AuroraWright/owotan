@@ -28,6 +28,12 @@ import {TextSourceElement} from '../dom/text-source-element.js';
 const SCAN_RESOLUTION_EXCLUDED_LANGUAGES = new Set(['ja', 'zh', 'yue', 'ko']);
 
 /**
+ * How long after a touch ends Safari selects the text that the touch looked up. iOS shows its edit menu for a tap on
+ * a selection, and a lookup on touch press, from the cache, can select the text before iOS has handled the tap.
+ */
+const SAFARI_TOUCH_SELECTION_DELAY = 100;
+
+/**
  * @augments EventDispatcher<import('text-scanner').Events>
  */
 export class TextScanner extends EventDispatcher {
@@ -153,6 +159,14 @@ export class TextScanner extends EventDispatcher {
         this._touchTapValid = false;
         /** @type {number} */
         this._touchPressTime = 0;
+        /** @type {boolean} */
+        this._touchPressed = false;
+        /** @type {number} */
+        this._touchReleaseTime = 0;
+        /** @type {?import('text-source').TextSource} */
+        this._touchSelectionPending = null;
+        /** @type {?import('core').Timeout} */
+        this._touchSelectionTimer = null;
         /** @type {?number} */
         this._primaryTouchIdentifier = null;
         /** @type {boolean} */
@@ -381,6 +395,7 @@ export class TextScanner extends EventDispatcher {
     /** */
     clearSelection() {
         if (!this._canClearSelection) { return; }
+        this._clearTouchSelection();
         if (this._textSourceCurrent !== null) {
             if (this._textSourceCurrentSelected) {
                 this._textSourceCurrent.deselect();
@@ -412,21 +427,14 @@ export class TextScanner extends EventDispatcher {
      */
     setCurrentTextSource(textSource) {
         this._textSourceCurrent = textSource;
+        this._clearTouchSelection();
         if (this._selectText && this._userHasNotSelectedAnythingManually && textSource !== null) {
-            this._yomitanIsChangingTextSelectionNow = true;
-            textSource.select();
-            // Safari on iOS only shows the selection of the frame that has focus, and tapping text in a frame,
-            // such as a popup, does not focus it.
-            if (this._browser === 'safari' && !document.hasFocus()) {
-                window.focus();
+            if (this._browser === 'safari' && (this._touchPressed || Date.now() - this._touchReleaseTime < SAFARI_TOUCH_SELECTION_DELAY)) {
+                this._touchSelectionPending = textSource;
+                this._scheduleTouchSelection();
+            } else {
+                this._selectTextSource(textSource);
             }
-            if (this._textSelectionTimer !== null) { clearTimeout(this._textSelectionTimer); }
-            // This timeout uses a 50ms delay to ensure that the selectionchange event has time to occur.
-            // If the delay is 0ms, the timeout will sometimes complete before the event.
-            this._textSelectionTimer = setTimeout(() => {
-                this._yomitanIsChangingTextSelectionNow = false;
-                this._textSelectionTimer = null;
-            }, 50);
             this._textSourceCurrentSelected = true;
         } else {
             this._textSourceCurrentSelected = false;
@@ -456,6 +464,52 @@ export class TextScanner extends EventDispatcher {
     }
 
     // Private
+
+    /**
+     * @param {import('text-source').TextSource} textSource
+     */
+    _selectTextSource(textSource) {
+        this._yomitanIsChangingTextSelectionNow = true;
+        textSource.select();
+        // Safari on iOS only shows the selection of the frame that has focus, and tapping text in a frame,
+        // such as a popup, does not focus it.
+        if (this._browser === 'safari' && !document.hasFocus()) {
+            window.focus();
+        }
+        if (this._textSelectionTimer !== null) { clearTimeout(this._textSelectionTimer); }
+        // This timeout uses a 50ms delay to ensure that the selectionchange event has time to occur.
+        // If the delay is 0ms, the timeout will sometimes complete before the event.
+        this._textSelectionTimer = setTimeout(() => {
+            this._yomitanIsChangingTextSelectionNow = false;
+            this._textSelectionTimer = null;
+        }, 50);
+    }
+
+    /**
+     * Selects the text that a touch looked up once iOS has handled the tap, unless the touch is still pressed.
+     */
+    _scheduleTouchSelection() {
+        if (this._touchSelectionPending === null || this._touchPressed || this._touchSelectionTimer !== null) { return; }
+        this._touchSelectionTimer = setTimeout(() => {
+            this._touchSelectionTimer = null;
+            const textSource = this._touchSelectionPending;
+            this._touchSelectionPending = null;
+            if (textSource !== null) { this._selectTextSource(textSource); }
+        }, Math.max(0, this._touchReleaseTime + SAFARI_TOUCH_SELECTION_DELAY - Date.now()));
+    }
+
+    /** */
+    _clearTouchSelectionTimer() {
+        if (this._touchSelectionTimer === null) { return; }
+        clearTimeout(this._touchSelectionTimer);
+        this._touchSelectionTimer = null;
+    }
+
+    /** */
+    _clearTouchSelection() {
+        this._clearTouchSelectionTimer();
+        this._touchSelectionPending = null;
+    }
 
     /**
      * @param {import('settings').OptionsContext} baseOptionsContext
@@ -787,6 +841,9 @@ export class TextScanner extends EventDispatcher {
         this._preventNextClick = false;
         this._touchTapValid = true;
         this._touchPressTime = Date.now();
+        this._touchPressed = true;
+        // A selection that still waits for the previous touch waits for this one too, since this one could be a tap on it
+        this._clearTouchSelectionTimer();
 
         const languageNotNull = this._language !== null ? this._language : '';
         const selection = window.getSelection();
@@ -825,6 +882,9 @@ export class TextScanner extends EventDispatcher {
      */
     _onPrimaryTouchEnd(e, x, y, allowSearch) {
         const touchReleaseTime = Date.now();
+        this._touchPressed = false;
+        this._touchReleaseTime = touchReleaseTime;
+        this._scheduleTouchSelection();
         this._primaryTouchIdentifier = null;
         this._preventScroll = false;
         this._preventNextClick = false;
