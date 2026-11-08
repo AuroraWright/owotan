@@ -151,4 +151,7 @@ Along the way it also fixes some performance and layout problems.
   - Dictionaries imported while another settings page was open could end up disabled.
   - The list sometimes stayed on "Deleting dictionary…" after a delete had finished.
 - Local audio that isn't allowed to play no longer hangs the audio player.
+- When a popup's options couldn't be set, as when its frame didn't answer in time, the scanner is still set up, and
+  the popup is updated again on the next lookup. Previously lookups stopped working in that page or popup until it
+  was reloaded; in a popup, this left nested popups broken.
 - Custom popup styles are only sent to popups whose frame has connected.

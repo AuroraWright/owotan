@@ -107,6 +107,12 @@ export class Frontend {
         this._popupEventListeners = new EventListenerCollection();
         /** @type {?import('core').TokenObject} */
         this._updatePopupToken = null;
+        /**
+         * Whether the last options update could not update the popup, which is then updated before it next shows
+         * content.
+         * @type {boolean}
+         */
+        this._popupUpdateFailed = false;
         /** @type {?import('core').Timeout} */
         this._clearSelectionTimer = null;
         /** @type {boolean} */
@@ -589,7 +595,17 @@ export class Frontend {
 
         this._hotkeyHandler.setHotkeys('web', options.inputs.hotkeys);
 
-        await this._updatePopup();
+        // The rest is set up even when the popup is not, as when its frame did not answer in time because Safari on
+        // iOS froze the page, so that a lookup can update it again.
+        try {
+            await this._updatePopup();
+            this._popupUpdateFailed = false;
+        } catch (e) {
+            this._popupUpdateFailed = true;
+            if (!this._application.webExtension.unloaded) {
+                log.error(e);
+            }
+        }
 
         const preventMiddleMouseOnPage = this._getPreventSecondaryMouseValueForPageType(scanningOptions.preventMiddleMouse);
         const preventMiddleMouseOnTextHover = scanningOptions.preventMiddleMouse.onTextHover;
@@ -868,18 +884,15 @@ export class Frontend {
         for (const {left, top, right, bottom} of textSource.getRects()) {
             sourceRects.push({left, top, right, bottom});
         }
-        this._lastShowPromise = (
-            this._popup !== null ?
-            this._popup.showContent(
-                {
-                    optionsContext,
-                    sourceRects,
-                    writingMode: textSource.getWritingMode(),
-                },
-                details,
-            ) :
-            Promise.resolve()
-        );
+        const writingMode = textSource.getWritingMode();
+        this._lastShowPromise = (async () => {
+            if (this._popupUpdateFailed) {
+                await this._updatePopup();
+                this._popupUpdateFailed = false;
+            }
+            if (this._popup === null) { return; }
+            await this._popup.showContent({optionsContext, sourceRects, writingMode}, details);
+        })();
         this._lastShowPromise.catch((error) => {
             if (this._application.webExtension.unloaded) { return; }
             log.error(error);
