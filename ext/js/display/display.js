@@ -52,6 +52,12 @@ import {QueryParser} from './query-parser.js';
 const ENTRY_BATCH_DURATION = 40;
 
 /**
+ * The longest, in milliseconds, that the display waits for the page to be drawn after the first entry, as a page that
+ * isn't visible is not drawn.
+ */
+const FIRST_ENTRY_DRAW_TIMEOUT = 100;
+
+/**
  * @augments EventDispatcher<import('display').Events>
  */
 export class Display extends EventDispatcher {
@@ -1481,8 +1487,13 @@ export class Display extends EventDispatcher {
         for (const dictionaryEntry of dictionaryEntries) {
             safePerformance.mark('display:createEntry:start');
 
-            // The first entry is shown on its own, and the rest in batches
-            if (i === 1 || (i > 1 && safePerformance.now() - batchStart >= ENTRY_BATCH_DURATION)) {
+            // The first entry is drawn on its own, and the rest are added in batches. A wait shorter than a frame doesn't
+            // let the page be drawn, so the first one waits for it.
+            if (i === 1) {
+                await this._waitForDraw(FIRST_ENTRY_DRAW_TIMEOUT);
+                if (this._setContentToken !== token) { return; }
+                batchStart = safePerformance.now();
+            } else if (i > 1 && safePerformance.now() - batchStart >= ENTRY_BATCH_DURATION) {
                 await promiseTimeout(1);
                 if (this._setContentToken !== token) { return; }
                 batchStart = safePerformance.now();
@@ -1924,6 +1935,24 @@ export class Display extends EventDispatcher {
     /** */
     _closePopups() {
         this._application.triggerClosePopups();
+    }
+
+    /**
+     * Waits until the page has been drawn, or for at most `timeout` milliseconds.
+     * @param {number} timeout
+     * @returns {Promise<void>}
+     */
+    _waitForDraw(timeout) {
+        return new Promise((resolve) => {
+            const timer = setTimeout(resolve, timeout);
+            // Animation frame callbacks run before the page is drawn, and timers after it
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    clearTimeout(timer);
+                    resolve();
+                }, 0);
+            });
+        });
     }
 
     /**
