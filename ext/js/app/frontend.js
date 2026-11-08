@@ -431,14 +431,15 @@ export class Frontend {
     /**
      * @param {import('text-scanner').EventArgument<'searchSuccess'>} details
      */
-    _onSearchSuccess({type, dictionaryEntries, sentence, inputInfo: {eventType, detail: inputInfoDetail}, textSource, optionsContext, detail, pageTheme}) {
+    _onSearchSuccess({type, dictionaryEntries, sentence, inputInfo: {pointerType, eventType, detail: inputInfoDetail}, textSource, optionsContext, detail, pageTheme}) {
         this._stopClearSelectionDelayed();
         let focus = (eventType === 'mouseMove');
         if (typeof inputInfoDetail === 'object' && inputInfoDetail !== null) {
             const focus2 = inputInfoDetail.focus;
             if (typeof focus2 === 'boolean') { focus = focus2; }
         }
-        this._showContent(textSource, focus, dictionaryEntries, type, sentence, detail !== null ? detail.documentTitle : null, optionsContext, pageTheme);
+        const hover = (eventType === 'mouseMove' || (pointerType === 'pen' && (eventType === 'pointerOver' || eventType === 'pointerMove')));
+        this._showContent(textSource, focus, hover, dictionaryEntries, type, sentence, detail !== null ? detail.documentTitle : null, optionsContext, pageTheme);
     }
 
     /** */
@@ -809,6 +810,7 @@ export class Frontend {
     /**
      * @param {import('text-source').TextSource} textSource
      * @param {boolean} focus
+     * @param {boolean} hover
      * @param {?import('dictionary').DictionaryEntry[]} dictionaryEntries
      * @param {import('display').PageType} type
      * @param {?import('display').HistoryStateSentence} sentence
@@ -816,7 +818,7 @@ export class Frontend {
      * @param {import('settings').OptionsContext} optionsContext
      * @param {'dark' | 'light'} pageTheme
      */
-    _showContent(textSource, focus, dictionaryEntries, type, sentence, documentTitle, optionsContext, pageTheme) {
+    _showContent(textSource, focus, hover, dictionaryEntries, type, sentence, documentTitle, optionsContext, pageTheme) {
         const query = textSource.text();
         const {url} = optionsContext;
         /** @type {import('display').HistoryState} */
@@ -828,6 +830,7 @@ export class Frontend {
         };
         if (sentence !== null) { detailsState.sentence = sentence; }
         if (documentTitle !== null) { detailsState.documentTitle = documentTitle; }
+        if (hover) { detailsState.hover = true; }
         const {tabId, frameId} = this._application;
         /** @type {import('display').HistoryContent} */
         const detailsContent = {

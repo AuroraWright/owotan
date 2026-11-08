@@ -95,6 +95,8 @@ export type HistoryState = {
     documentTitle?: string;
     /** Computed theme of the page */
     pageTheme?: 'dark' | 'light';
+    /** Whether a mouse or pen hovering over the text looked it up, rather than a tap, click or other action. */
+    hover?: boolean;
 };
 
 /**

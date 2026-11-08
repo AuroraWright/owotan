@@ -103,7 +103,6 @@ export class DisplayAudio {
         this._display.on('optionsUpdated', this._onOptionsUpdated.bind(this));
         this._display.on('contentClear', this._onContentClear.bind(this));
         this._display.on('contentUpdateEntry', this._onContentUpdateEntry.bind(this));
-        this._display.on('contentUpdateComplete', this._onContentUpdateComplete.bind(this));
         this._display.on('frameVisibilityChange', this._onFrameVisibilityChange.bind(this));
         const options = this._display.getOptions();
         if (options !== null) {
@@ -213,17 +212,21 @@ export class DisplayAudio {
     /**
      * @param {import('display').EventArgument<'contentUpdateEntry'>} details
      */
-    _onContentUpdateEntry({element}) {
+    _onContentUpdateEntry({element, index}) {
         const eventListeners = this._eventListeners;
         for (const button of element.querySelectorAll('.action-button[data-action=play-audio]')) {
             eventListeners.addEventListener(button, 'click', this._onAudioPlayButtonClickBind, false);
             eventListeners.addEventListener(button, 'contextmenu', this._onAudioPlayButtonContextMenuBind, false);
             eventListeners.addEventListener(button, 'menuClose', this._onAudioPlayMenuCloseClickBind, false);
         }
+        // Auto-play only needs the first entry, so it doesn't wait for the others
+        if (index === 0) {
+            this._startAutoPlay();
+        }
     }
 
     /** */
-    _onContentUpdateComplete() {
+    _startAutoPlay() {
         if (!this._autoPlay || !this._display.frameVisible) { return; }
 
         this.clearAutoPlayTimer();
@@ -239,8 +242,10 @@ export class DisplayAudio {
             void this.playAudio(0, 0);
         };
 
-        if (this._autoPlayAudioDelay > 0) {
-            this._autoPlayAudioTimer = setTimeout(callback, this._autoPlayAudioDelay);
+        // The delay keeps a pointer moving over text from playing every word it passes, so other lookups don't wait
+        const delay = this._display.history.state?.hover === true ? this._autoPlayAudioDelay : 0;
+        if (delay > 0) {
+            this._autoPlayAudioTimer = setTimeout(callback, delay);
         } else {
             callback();
         }
