@@ -43,6 +43,12 @@ export class DisplayAudio {
         this._autoPlayAudioTimer = null;
         /** @type {number} */
         this._autoPlayAudioDelay = 400;
+        /**
+         * Shows the progress bar while audio loads. It's removed when other audio is played or the content changes,
+         * in case the audio never loads, as when Safari never answers a message whose background page stopped.
+         * @type {?import('core').TokenString}
+         */
+        this._progressIndicatorToken = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
         /** @type {Map<string, import('display-audio').CacheItem>} */
@@ -206,6 +212,7 @@ export class DisplayAudio {
         this._entriesToken = {};
         this._cache.clear();
         this.clearAutoPlayTimer();
+        this._clearProgressIndicator();
         this._eventListeners.removeAllEventListeners();
     }
 
@@ -435,8 +442,9 @@ export class DisplayAudio {
 
         const {term, reading} = headword;
 
-        const progressIndicatorVisible = this._display.progressIndicatorVisible;
-        const overrideToken = progressIndicatorVisible.setOverride(true);
+        this._clearProgressIndicator();
+        const overrideToken = this._display.progressIndicatorVisible.setOverride(true);
+        this._progressIndicatorToken = overrideToken;
         try {
             // Create audio
             let audio;
@@ -482,8 +490,17 @@ export class DisplayAudio {
 
             return {audio, source, subIndex, valid};
         } finally {
-            progressIndicatorVisible.clearOverride(overrideToken);
+            if (this._progressIndicatorToken === overrideToken) {
+                this._clearProgressIndicator();
+            }
         }
+    }
+
+    /** */
+    _clearProgressIndicator() {
+        if (this._progressIndicatorToken === null) { return; }
+        this._display.progressIndicatorVisible.clearOverride(this._progressIndicatorToken);
+        this._progressIndicatorToken = null;
     }
 
     /**

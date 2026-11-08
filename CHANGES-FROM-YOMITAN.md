@@ -153,6 +153,9 @@ Along the way it also fixes some performance and layout problems.
   - Dictionaries imported while another settings page was open could end up disabled.
   - The list sometimes stayed on "Deleting dictionary…" after a delete had finished.
 - Local audio that isn't allowed to play no longer hangs the audio player.
+- The progress bar for audio that never loads goes away when other audio is played or the popup shows another lookup.
+  Previously it stayed until the popup was reloaded. In Safari this happened when a request for audio never got an
+  answer, which Safari allows when the background page stops while answering.
 - When a popup's options couldn't be set, as when its frame didn't answer in time, the scanner is still set up, and
   the popup is updated again on the next lookup. Previously lookups stopped working in that page or popup until it
   was reloaded; in a popup, this left nested popups broken.
