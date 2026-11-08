@@ -38,6 +38,8 @@ export class CollapsibleDictionaryController {
         this._selects = [];
         /** @type {?HTMLSelectElement} */
         this._allSelect = null;
+        /** @type {?Promise<void>} */
+        this._updateAllSelectPromise = null;
     }
 
     /** */
@@ -164,7 +166,16 @@ export class CollapsibleDictionaryController {
 
     /** */
     async _updateAllSelectFresh() {
-        this._updateAllSelect(await this._settingsController.getOptions());
+        // Each dictionary's select asks for this when the list is made, and each update reads the options, so the
+        // requests that arrive together are made once
+        if (this._updateAllSelectPromise === null) {
+            this._updateAllSelectPromise = (async () => {
+                await Promise.resolve();
+                this._updateAllSelectPromise = null;
+                this._updateAllSelect(await this._settingsController.getOptions());
+            })();
+        }
+        await this._updateAllSelectPromise;
     }
 
     /**

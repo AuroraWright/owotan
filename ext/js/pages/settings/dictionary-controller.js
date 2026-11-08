@@ -602,6 +602,8 @@ export class DictionaryController {
         this._databaseStateToken = null;
         /** @type {?import('core').TokenObject} */
         this._updateEntriesToken = null;
+        /** @type {?Promise<void>} */
+        this._updateDictionariesEnabledPromise = null;
         /** @type {boolean} */
         this._checkingUpdates = false;
         /** @type {boolean} */
@@ -800,8 +802,17 @@ export class DictionaryController {
 
     /** */
     async updateDictionariesEnabled() {
-        const options = await this._settingsController.getOptions();
-        this._updateDictionariesEnabledWarnings(options);
+        // Each dictionary's checkbox asks for this when the list is made, and each update reads the options and makes the
+        // popup preview look its text up again, so the requests that arrive together are made once
+        if (this._updateDictionariesEnabledPromise === null) {
+            this._updateDictionariesEnabledPromise = (async () => {
+                await Promise.resolve();
+                this._updateDictionariesEnabledPromise = null;
+                const options = await this._settingsController.getOptions();
+                this._updateDictionariesEnabledWarnings(options);
+            })();
+        }
+        await this._updateDictionariesEnabledPromise;
     }
 
     /**

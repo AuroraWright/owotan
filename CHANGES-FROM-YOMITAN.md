@@ -136,6 +136,11 @@ Along the way it also fixes some performance and layout problems.
   entry, from about 200 ms to about 110 ms.
 - The popup's custom CSS and dictionary styles are set only when they change. Every lookup set them twice, so the
   browser parsed them twice and restyled the popup, about 14 ms per lookup on iOS with 130 KB of styles.
+- The settings page updates its count of enabled dictionaries, the popup preview and the "all dictionaries" select
+  once when the dictionary list is made, instead of once per dictionary. With 89 dictionaries, opening the settings page
+  made 91 preview lookups and about 300 requests for the options, about 85 MB of messages; it now makes 3 lookups and
+  47 requests. As the list is made again after each import, importing dictionaries one after another grew with the
+  square of their number: importing 89 made 4,150 preview lookups and 20,518 requests for the options.
 - Fixed dictionary list bugs:
   - Overlapping list updates duplicated entries.
   - Dictionaries imported while another settings page was open could end up disabled.
