@@ -130,6 +130,8 @@ Along the way it also fixes some performance and layout problems.
   visible part of the popup. Checking them made the browser lay out every entry, including those that
   `content-visibility: auto` would otherwise skip until they're scrolled to. On iOS this halved the time to show every
   entry, from about 200 ms to about 110 ms.
+- The popup's custom CSS and dictionary styles are set only when they change. Every lookup set them twice, so the
+  browser parsed them twice and restyled the popup, about 14 ms per lookup on iOS with 130 KB of styles.
 - Fixed dictionary list bugs:
   - Overlapping list updates duplicated entries.
   - Dictionaries imported while another settings page was open could end up disabled.

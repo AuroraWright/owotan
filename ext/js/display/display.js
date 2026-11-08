@@ -85,6 +85,8 @@ export class Display extends EventDispatcher {
         this._index = 0;
         /** @type {?HTMLStyleElement} */
         this._styleNode = null;
+        /** @type {?string} */
+        this._customCss = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
         /** @type {?import('core').TokenObject} */
@@ -562,6 +564,9 @@ export class Display extends EventDispatcher {
      * @param {string} css
      */
     setCustomCss(css) {
+        // Each lookup sets the styles again, and setting them makes the browser parse them and restyle the whole page
+        if (css === this._customCss) { return; }
+        this._customCss = css;
         if (this._browser === 'safari') {
             css = adaptCssForWebKit(css);
         }
