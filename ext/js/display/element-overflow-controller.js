@@ -27,6 +27,10 @@ export class ElementOverflowController {
         this._display = display;
         /** @type {Element[]} */
         this._elements = [];
+        /** @type {Map<Element, Element[]>} */
+        this._observedEntries = new Map();
+        /** @type {?IntersectionObserver} */
+        this._intersectionObserver = null;
         /** @type {?(number|import('core').Timeout)} */
         this._checkTimer = null;
         /** @type {EventListenerCollection} */
@@ -101,7 +105,6 @@ export class ElementOverflowController {
                 element.classList.add('collapsible', 'collapsible-forced');
             } else {
                 elementsToUpdate.push(element);
-                this._elements.push(element);
             }
 
             if (dictionaryInfo.collapsed) {
@@ -113,9 +116,24 @@ export class ElementOverflowController {
                 this._eventListeners.addEventListener(button, 'click', this._onToggleButtonClickBind, false);
             }
         }
-        this._updateElements(elementsToUpdate);
+        if (elementsToUpdate.length > 0) {
+            // Measuring the elements makes the browser lay out the page, including entries far from the visible part of
+            // it, which it otherwise only lays out once they come near it (they have `content-visibility: auto`). So each
+            // entry is measured once it comes near it, and until then, the elements that start collapsed are kept as
+            // short as the test makes them.
+            for (const element of elementsToUpdate) {
+                if (element.classList.contains('collapsed')) {
+                    element.classList.add('collapse-test');
+                }
+            }
+            if (this._intersectionObserver === null) {
+                this._intersectionObserver = new IntersectionObserver(this._onIntersection.bind(this), {rootMargin: '100% 0px'});
+            }
+            this._intersectionObserver.observe(entry);
+            this._observedEntries.set(entry, elementsToUpdate);
+        }
 
-        if (this._elements.length > 0 && this._windowEventListeners.size === 0) {
+        if (elementsToUpdate.length > 0 && this._windowEventListeners.size === 0) {
             this._windowEventListeners.addEventListener(window, 'resize', this._onWindowResizeBind, false);
         }
     }
@@ -123,6 +141,10 @@ export class ElementOverflowController {
     /** */
     clearElements() {
         this._elements.length = 0;
+        this._observedEntries.clear();
+        if (this._intersectionObserver !== null) {
+            this._intersectionObserver.disconnect();
+        }
         this._eventListeners.removeAllEventListeners();
         this._windowEventListeners.removeAllEventListeners();
     }
@@ -159,6 +181,24 @@ export class ElementOverflowController {
     /** */
     _update() {
         this._updateElements(this._elements);
+    }
+
+    /**
+     * @param {IntersectionObserverEntry[]} records
+     */
+    _onIntersection(records) {
+        /** @type {Element[]} */
+        const elements = [];
+        for (const {target, isIntersecting} of records) {
+            if (!isIntersecting) { continue; }
+            const entryElements = this._observedEntries.get(target);
+            if (typeof entryElements === 'undefined') { continue; }
+            this._observedEntries.delete(target);
+            /** @type {IntersectionObserver} */ (this._intersectionObserver).unobserve(target);
+            elements.push(...entryElements);
+        }
+        this._elements.push(...elements);
+        this._updateElements(elements);
     }
 
     /**

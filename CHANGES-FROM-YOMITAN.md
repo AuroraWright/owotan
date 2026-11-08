@@ -126,7 +126,10 @@ Along the way it also fixes some performance and layout problems.
 - Entries after the first are added in batches, instead of waiting after each one, which made long lists 10–30% faster
   on iOS.
 - When a lookup adds an entry, only the last entry is restyled; previously the whole list was.
-- Collapsible definitions are checked together rather than one at a time.
+- Collapsible definitions are checked together rather than one at a time, and only once their entry comes near the
+  visible part of the popup. Checking them made the browser lay out every entry, including those that
+  `content-visibility: auto` would otherwise skip until they're scrolled to. On iOS this halved the time to show every
+  entry, from about 200 ms to about 110 ms.
 - Fixed dictionary list bugs:
   - Overlapping list updates duplicated entries.
   - Dictionaries imported while another settings page was open could end up disabled.
