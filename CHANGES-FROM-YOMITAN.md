@@ -73,9 +73,11 @@ Along the way it also fixes some performance and layout problems.
   local network addresses is downloaded by the background page.
 - **Local android.db audio on iOS.** A new audio source plays audio from the `android.db` file that the Local Audio
   Server for Yomichan add-on generates. The file is copied into the Yomitan app's folder in the Files app.
-- **Returning from suspension.** iOS throttles the extension's background page after Safari is suspended, making
-  lookups take seconds. The extension now reloads itself when a page shows again after Safari has been away for
-  10 s or more.
+- **Returning from suspension.**
+  - iOS throttles the extension's background page after Safari is suspended, making lookups take seconds. The
+    extension now reloads itself when a page shows again after Safari has been away for 10 s or more.
+  - Timeouts for messages between a page and its popups, and for connecting a popup, wait again when they run late
+    because the page was frozen, instead of failing as soon as Safari returns.
 - **Exports on iOS.** Exported settings and Anki decks go to the share sheet, since Safari on iOS can't download
   files from extension pages.
 - **Layout on small screens.**

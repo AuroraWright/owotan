@@ -18,6 +18,7 @@
 
 import {isObjectNotArray} from '../core/object-utilities.js';
 import {deferPromise, generateId} from '../core/utilities.js';
+import {FROZEN_TIMER_DELAY} from './cross-frame-api.js';
 
 export class FrameClient {
     /**
@@ -207,10 +208,19 @@ export class FrameClient {
             };
 
             // Start
-            timer = setTimeout(() => {
-                cleanup();
-                reject(new Error('Timeout'));
-            }, timeout);
+            const startTimer = () => {
+                const end = Date.now() + timeout;
+                timer = setTimeout(() => {
+                    // Late after the page was frozen, when the frame could not answer either
+                    if (Date.now() - end >= FROZEN_TIMER_DELAY) {
+                        startTimer();
+                        return;
+                    }
+                    cleanup();
+                    reject(new Error('Timeout'));
+                }, timeout);
+            };
+            startTimer();
 
             this._webExtension.addMessageListener(onMessage);
             frame.addEventListener('load', onLoad);

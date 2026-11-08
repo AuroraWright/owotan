@@ -25,6 +25,12 @@ import {log} from '../core/log.js';
 import {safePerformance} from '../core/safe-performance.js';
 
 /**
+ * How late a timer must run to be taken as one that was paused with its page, as Safari on iOS freezes the pages
+ * of the app it leaves for another.
+ */
+export const FROZEN_TIMER_DELAY = 1000;
+
+/**
  * @augments EventDispatcher<import('cross-frame-api').CrossFrameAPIPortEvents>
  */
 export class CrossFrameAPIPort extends EventDispatcher {
@@ -108,7 +114,7 @@ export class CrossFrameAPIPort extends EventDispatcher {
 
             if (ackTimeout !== null) {
                 try {
-                    invocation.timer = setTimeout(() => this._onError(id, 'Acknowledgement timeout'), ackTimeout);
+                    this._setTimer(invocation, ackTimeout, 'Acknowledgement timeout');
                 } catch (e) {
                     this._onError(id, 'Failed to set timeout');
                     return;
@@ -206,7 +212,7 @@ export class CrossFrameAPIPort extends EventDispatcher {
         const responseTimeout = invocation.responseTimeout;
         if (responseTimeout !== null) {
             try {
-                invocation.timer = setTimeout(() => this._onError(id, 'Response timeout'), responseTimeout);
+                this._setTimer(invocation, responseTimeout, 'Response timeout');
             } catch (e) {
                 this._onError(id, 'Failed to set timeout');
             }
@@ -260,6 +266,25 @@ export class CrossFrameAPIPort extends EventDispatcher {
             invocation.timer = null;
         }
         invocation.reject(error);
+    }
+
+    /**
+     * Fails an invocation if it is not answered in time. A timer that runs late, as it does after the page was
+     * frozen, waits again, since the other frame was frozen too and could not answer.
+     * @param {import('cross-frame-api').Invocation} invocation
+     * @param {number} timeout
+     * @param {string} message
+     */
+    _setTimer(invocation, timeout, message) {
+        const end = Date.now() + timeout;
+        invocation.timer = setTimeout(() => {
+            invocation.timer = null;
+            if (Date.now() - end >= FROZEN_TIMER_DELAY) {
+                this._setTimer(invocation, timeout, message);
+                return;
+            }
+            this._onError(invocation.id, message);
+        }, timeout);
     }
 
     // Invocation
