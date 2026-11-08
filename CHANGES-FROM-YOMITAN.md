@@ -117,6 +117,8 @@ Along the way it also fixes some performance and layout problems.
 - Anki duplicate checks render each field marker once per dictionary entry, and dictionary styles are scoped and
   sanitized once instead of per definition and per note. A word with 158 definitions went from 448 renders (2.35 s)
   to 126 renders (0.23 s).
+- Entries after the first are added in batches, instead of waiting after each one, which made long lists 10–30% faster
+  on iOS.
 - When a lookup adds an entry, only the last entry is restyled; previously the whole list was.
 - Collapsible definitions are checked together rather than one at a time.
 - Fixed dictionary list bugs:

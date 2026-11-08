@@ -46,6 +46,12 @@ import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
 
 /**
+ * How long, in milliseconds, entries are added for before the display lets the page update and handle input. Waiting
+ * after each entry took about as long as adding the entries.
+ */
+const ENTRY_BATCH_DURATION = 40;
+
+/**
  * @augments EventDispatcher<import('display').Events>
  */
 export class Display extends EventDispatcher {
@@ -1466,12 +1472,15 @@ export class Display extends EventDispatcher {
         this._triggerContentUpdateStart();
 
         let i = 0;
+        let batchStart = 0;
         for (const dictionaryEntry of dictionaryEntries) {
             safePerformance.mark('display:createEntry:start');
 
-            if (i > 0) {
+            // The first entry is shown on its own, and the rest in batches
+            if (i === 1 || (i > 1 && safePerformance.now() - batchStart >= ENTRY_BATCH_DURATION)) {
                 await promiseTimeout(1);
                 if (this._setContentToken !== token) { return; }
+                batchStart = safePerformance.now();
             }
 
             safePerformance.mark('display:createEntryReal:start');
