@@ -93,8 +93,8 @@ Along the way it also fixes some performance and layout problems.
   `addnote` link, which returns to the page. AnkiConnect remains the default.
 - **Decks and note types.** AnkiMobile passes its decks and note types to the Yomitan app, which gives them to the
   extension.
-- **Duplicate checks.** Yomitan can keep a read-only copy of the collection from the sync server that AnkiMobile uses
-  (AnkiWeb or a self-hosted server). It syncs as Anki does but always aborts, so nothing on the server changes.
+- **Duplicate checks.** Yomitan can keep a read-only copy of the collection from the sync server that AnkiMobile uses.
+  It syncs as Anki does but always aborts, so nothing on the server changes.
   Duplicates are then checked by Anki's rules.
 - **Media.** With a sync server login, images and audio are uploaded through a media sync, the way Anki does it.
   Without one, they're sent in the note as data URLs.
