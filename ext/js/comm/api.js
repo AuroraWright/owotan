@@ -526,10 +526,11 @@ export class API {
     /**
      * @param {import('api').ApiParam<'pageVisibilityChanged', 'visible'>} visible
      * @param {import('api').ApiParam<'pageVisibilityChanged', 'time'>} time
+     * @param {import('api').ApiParam<'pageVisibilityChanged', 'frozenTime'>} frozenTime
      * @returns {Promise<import('api').ApiReturn<'pageVisibilityChanged'>>}
      */
-    pageVisibilityChanged(visible, time) {
-        return this._invoke('pageVisibilityChanged', {visible, time});
+    pageVisibilityChanged(visible, time, frozenTime) {
+        return this._invoke('pageVisibilityChanged', {visible, time, frozenTime});
     }
 
     // Utilities

@@ -1470,15 +1470,27 @@ export class Backend {
      * foreground priority, and it is only given one again when the background page loads. Lookups then take tens
      * of seconds. So when a web page shows after all of them were hidden for long enough that Safari was suspended,
      * the extension reloads, which loads the background page again. The content scripts keep working.
+     *
+     * Safari often freezes a page when it leaves for another app before the page can say that it is hidden. The
+     * page then says when it was frozen, and no other page was visible since.
      * @type {import('api').ApiHandler<'pageVisibilityChanged'>}
      */
-    _onApiPageVisibilityChanged({visible, time}, sender) {
+    _onApiPageVisibilityChanged({visible, time, frozenTime}, sender) {
         const tabId = sender.tab?.id;
         if (typeof tabId !== 'number' || this._environment.getInfo().platform.os !== 'ios') { return; }
         if (!visible) {
             this._visiblePageTabIds.delete(tabId);
             this._pageHiddenTime = Math.max(this._pageHiddenTime, time);
             return;
+        }
+        if (frozenTime !== null) {
+            if (time - frozenTime < SAFARI_SUSPENDED_HIDDEN_DURATION) {
+                this._visiblePageTabIds.add(tabId);
+                return;
+            }
+            // The other pages were frozen too, before they could say they were hidden
+            this._visiblePageTabIds.clear();
+            this._pageHiddenTime = Math.max(this._pageHiddenTime, frozenTime);
         }
         this._visiblePageTabIds.delete(tabId);
         const otherPageVisible = this._visiblePageTabIds.size > 0;

@@ -495,6 +495,11 @@ type ApiSurface = {
             visible: boolean;
             /** When the visibility changed, from `Date.now()`. */
             time: number;
+            /**
+             * For a page that shows after it was frozen without being told that it was hidden, when it last ran
+             * before, from `Date.now()`.
+             */
+            frozenTime: number | null;
         };
         return: void;
     };

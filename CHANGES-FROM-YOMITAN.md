@@ -76,6 +76,8 @@ Along the way it also fixes some performance and layout problems.
 - **Returning from suspension.**
   - iOS throttles the extension's background page after Safari is suspended, making lookups take seconds. The
     extension now reloads itself when a page shows again after Safari has been away for 10 s or more.
+  - Safari often freezes a page when it leaves for another app before the page learns that it's hidden. The page
+    now notices this from a check that runs late, so the extension still reloads.
   - Timeouts for messages between a page and its popups, and for connecting a popup, wait again when they run late
     because the page was frozen, instead of failing as soon as Safari returns.
 - **Exports on iOS.** Exported settings and Anki decks go to the share sheet, since Safari on iOS can't download

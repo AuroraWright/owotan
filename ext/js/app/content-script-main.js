@@ -22,6 +22,16 @@ import {HotkeyHandler} from '../input/hotkey-handler.js';
 import {Frontend} from './frontend.js';
 import {PopupFactory} from './popup-factory.js';
 
+/**
+ * How often a page checks whether it was frozen, in milliseconds.
+ */
+const FROZEN_PAGE_CHECK_INTERVAL = 1000;
+
+/**
+ * How late a check must run for the page to have been frozen, in milliseconds.
+ */
+const FROZEN_PAGE_DELAY = 2000;
+
 await Application.main(false, async (application) => {
     const hotkeyHandler = new HotkeyHandler();
     hotkeyHandler.prepare(application.crossFrame);
@@ -29,7 +39,7 @@ await Application.main(false, async (application) => {
     const popupFactory = new PopupFactory(application);
     popupFactory.prepare();
 
-    const {browser} = await application.api.getEnvironmentInfo();
+    const {browser, platform} = await application.api.getEnvironmentInfo();
 
     const frontend = new Frontend({
         application,
@@ -49,12 +59,25 @@ await Application.main(false, async (application) => {
 
     if (browser === 'safari' && window === window.parent) {
         // See Backend._onApiPageVisibilityChanged
-        const onVisibilityChange = () => {
-            application.api.pageVisibilityChanged(document.visibilityState === 'visible', Date.now()).catch((error) => {
+        let reportedVisible = false;
+        let lastCheckTime = Date.now();
+        const checkVisibility = () => {
+            const time = Date.now();
+            const visible = (document.visibilityState === 'visible');
+            // Safari on iOS often freezes the page when it leaves for another app before the page learns that it is
+            // hidden, which shows as a check that runs late.
+            const frozenTime = (reportedVisible && visible && time - lastCheckTime >= FROZEN_PAGE_DELAY) ? lastCheckTime : null;
+            lastCheckTime = time;
+            if (visible === reportedVisible && frozenTime === null) { return; }
+            reportedVisible = visible;
+            application.api.pageVisibilityChanged(visible, time, frozenTime).catch((error) => {
                 if (!application.webExtension.unloaded) { log.error(error); }
             });
         };
-        document.addEventListener('visibilitychange', onVisibilityChange, false);
-        if (document.visibilityState === 'visible') { onVisibilityChange(); }
+        document.addEventListener('visibilitychange', checkVisibility, false);
+        if (platform.os === 'ios') {
+            setInterval(checkVisibility, FROZEN_PAGE_CHECK_INTERVAL);
+        }
+        checkVisibility();
     }
 });
