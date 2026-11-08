@@ -484,11 +484,23 @@ export class Backend {
     _onMessageWrapper(message, sender, sendResponse) {
         const message2 = /** @type {unknown} */ (message);
         if (typeof message2 === 'string') {
-            // Safari, where WebExtension.sendMessage sends JSON to keep the order of the keys
+            // Safari, where WebExtension.sendMessage sends JSON to keep the order of the keys. The answer also says
+            // whether the frame has a port for its messages, since the frame keeps a port that a reload of the
+            // extension closed without it being told.
+            const {tab, frameId} = sender;
+            const messagePortMissing = (
+                typeof tab?.id === 'number' &&
+                typeof frameId === 'number' &&
+                this._tabMessagePorts.get(tab.id)?.has(frameId) !== true
+            );
             return this._onMessageWrapper(
                 parseJson(message2),
                 sender,
-                (response) => { sendResponse(typeof response === 'undefined' ? response : JSON.stringify(response)); },
+                (response) => {
+                    /** @type {import('web-extension').JsonResponse} */
+                    const jsonResponse = {response, messagePortMissing};
+                    sendResponse(JSON.stringify(jsonResponse));
+                },
             );
         }
         if (this._isPrepared) {

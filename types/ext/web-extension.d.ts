@@ -32,3 +32,10 @@ export type PortResponse = {
     id: number;
     response: unknown;
 };
+
+/** The backend's answer in Safari to a message sent as JSON, as JSON. */
+export type JsonResponse = {
+    response?: unknown;
+    /** Whether the frame that sent the message has no port for its messages in the backend. */
+    messagePortMissing: boolean;
+};

@@ -20,6 +20,16 @@ import {parseJson} from '../core/json.js';
 import {toError} from '../core/to-error.js';
 import {isSafariExtension} from './app-extension.js';
 
+/** How long, in milliseconds, a frame's port for its messages is kept before it can be opened again. */
+const MESSAGE_PORT_RECONNECT_MINIMUM_AGE = 1000;
+
+/**
+ * Reopens the port for the frame's messages of each instance in this frame that opened one. A frame has more than one
+ * instance, and the one that sends a message is not always the one that listens.
+ * @type {Set<() => void>}
+ */
+const messagePortReconnectors = new Set();
+
 /**
  * @augments EventDispatcher<import('web-extension').Events>
  */
@@ -39,6 +49,10 @@ export class WebExtension extends EventDispatcher {
         this._messageListeners = new Set();
         /** @type {?chrome.runtime.Port} */
         this._messagePort = null;
+        /** @type {number} */
+        this._messagePortConnectTime = 0;
+        /** @type {() => void} */
+        this._reconnectMessagePortBind = this._reconnectMessagePort.bind(this);
         /** @type {string} */
         this._extensionName = 'Extension';
         try {
@@ -78,7 +92,16 @@ export class WebExtension extends EventDispatcher {
                 // Safari reorders the keys of objects in messages, and the order of some matters, such as a note's fields.
                 // JSON keeps it, and the backend answers a message sent as JSON with JSON (Backend._onMessageWrapper).
                 chrome.runtime.sendMessage(JSON.stringify(message), (/** @type {unknown} */ response) => {
-                    responseCallback(typeof response === 'string' ? parseJson(response) : response);
+                    if (typeof response !== 'string') {
+                        responseCallback(response);
+                        return;
+                    }
+                    /** @type {import('web-extension').JsonResponse} */
+                    const {response: response2, messagePortMissing} = parseJson(response);
+                    if (messagePortMissing) {
+                        for (const reconnect of messagePortReconnectors) { reconnect(); }
+                    }
+                    responseCallback(response2);
                 });
             } else {
                 chrome.runtime.sendMessage(message, responseCallback);
@@ -166,18 +189,42 @@ export class WebExtension extends EventDispatcher {
      */
     _connectMessagePort() {
         if (this._messagePort !== null || this._extensionBaseUrl === null || !isSafariExtension()) { return; }
+        /** @type {chrome.runtime.Port} */
+        let port;
         try {
-            this._messagePort = chrome.runtime.connect({name: 'tabMessages'});
+            port = chrome.runtime.connect({name: 'tabMessages'});
         } catch (e) {
             this.triggerUnloaded();
             return;
         }
-        this._messagePort.onMessage.addListener(this._onMessagePortMessage.bind(this, this._messagePort));
-        this._messagePort.onDisconnect.addListener(() => {
+        this._messagePort = port;
+        this._messagePortConnectTime = Date.now();
+        messagePortReconnectors.add(this._reconnectMessagePortBind);
+        port.onMessage.addListener(this._onMessagePortMessage.bind(this, port));
+        port.onDisconnect.addListener(() => {
             this.getLastError();
+            if (this._messagePort !== port) { return; }
             this._messagePort = null;
             this._connectMessagePort();
         });
+    }
+
+    /**
+     * Opens the port for this frame's messages again when the backend has no port for this frame. When Safari reloads
+     * the extension, as the backend does on iOS after Safari was suspended, the frames' ports are closed without
+     * a disconnect event, so the backend could no longer reach them.
+     */
+    _reconnectMessagePort() {
+        const port = this._messagePort;
+        // A port that has just been opened may only reach the backend after a message sent since
+        if (port === null || Date.now() - this._messagePortConnectTime < MESSAGE_PORT_RECONNECT_MINIMUM_AGE) { return; }
+        this._messagePort = null;
+        try {
+            port.disconnect();
+        } catch (e) {
+            // NOP
+        }
+        this._connectMessagePort();
     }
 
     /**
