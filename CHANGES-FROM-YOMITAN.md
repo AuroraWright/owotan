@@ -127,6 +127,8 @@ Along the way it also fixes some performance and layout problems.
   on iOS.
 - The first entry is drawn before the others are added. The wait after it was shorter than a frame, so the browser drew
   every entry at once: on iOS, the first entry now shows about 180 ms after a tap instead of 230 ms.
+- A popup's entries are removed when it is hidden, instead of when the next lookup starts, which spent about 7 ms
+  (up to 17 ms) on it on iOS.
 - When a lookup adds an entry, only the last entry is restyled; previously the whole list was.
 - Collapsible definitions are checked together rather than one at a time, and only once their entry comes near the
   visible part of the popup. Checking them made the browser lay out every entry, including those that

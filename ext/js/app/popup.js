@@ -246,6 +246,7 @@ export class Popup extends EventDispatcher {
         this.stopHideDelayed();
 
         this._setVisible(false);
+        void this._invokeSafe('displayHidden', void 0);
         if (this._child !== null) {
             this._child.hide(false);
         }

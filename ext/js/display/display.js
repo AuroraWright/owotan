@@ -240,6 +240,7 @@ export class Display extends EventDispatcher {
             ['displaySetContentScale',   this._onMessageSetContentScale.bind(this)],
             ['displayConfigure',         this._onMessageConfigure.bind(this)],
             ['displayVisibilityChanged', this._onMessageVisibilityChanged.bind(this)],
+            ['displayHidden',            this._onMessageHidden.bind(this)],
         ]);
         this.registerWindowMessageHandlers([
             ['displayExtensionUnloaded', this._onMessageExtensionUnloaded.bind(this)],
@@ -818,6 +819,13 @@ export class Display extends EventDispatcher {
     _onMessageVisibilityChanged({value}) {
         this._frameVisible = value;
         this.trigger('frameVisibilityChange', {value});
+    }
+
+    /** @type {import('display').DirectApiHandler<'displayHidden'>} */
+    _onMessageHidden() {
+        // Removing the entries from the page takes several milliseconds, which the next lookup would otherwise spend.
+        // The popup is only shown again with new content.
+        this._container.textContent = '';
     }
 
     /** @type {import('display').WindowApiHandler<'displayExtensionUnloaded'>} */

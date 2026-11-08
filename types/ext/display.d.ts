@@ -212,6 +212,10 @@ export type DirectApiSurface = {
         };
         return: void;
     };
+    displayHidden: {
+        params: void;
+        return: void;
+    };
 };
 
 export type DirectApiNames = BaseApiNames<DirectApiSurface>;
