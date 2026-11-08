@@ -35,6 +35,7 @@
 //     [--bundle-id <id>] [--project-only]
 
 import {execFileSync} from 'child_process';
+import {createHash} from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
@@ -113,6 +114,9 @@ fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'AppDelegate.swift'), 
 // The iOS app copies android.db, which the user puts in its folder in the Files app, to storage that it shares with
 // the app extension, which reads audio from it (SceneDelegate.swift).
 fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'SceneDelegate.swift'), path.join(appDirectory, appName, 'iOS (App)', 'SceneDelegate.swift'));
+// The App Store requires apps to give their reasons for the APIs that Apple lists, such as SceneDelegate.swift's use of
+// file modification dates.
+fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'PrivacyInfo.xcprivacy'), path.join(appDirectory, appName, 'iOS (App)', 'PrivacyInfo.xcprivacy'));
 const iosAppInfoPath = path.join(appDirectory, appName, 'iOS (App)', 'Info.plist');
 for (const key of ['UIFileSharingEnabled', 'LSSupportsOpeningDocumentsInPlace']) {
     run('plutil', ['-replace', key, '-bool', 'YES', iosAppInfoPath]);
@@ -151,6 +155,38 @@ function addBuildSetting(infoPlistPath, setting) {
     }
     projectFile = projectFile.replace(pattern, `$1${setting}\n\t\t\t\t$2`);
 }
+/**
+ * Adds a file in a group's folder to the resources of a target.
+ * @param {string} groupName
+ * @param {string} targetName
+ * @param {string} fileName
+ * @throws {Error} If the project has no such group or target.
+ */
+function addResource(groupName, targetName, fileName) {
+    const escape = (/** @type {string} */ value) => value.replace(/[()./]/g, '\\$&');
+    const groupChildren = new RegExp(`\\w+ /\\* ${escape(groupName)} \\*/ = \\{\\s*isa = PBXGroup;\\s*children = \\(\\n`).exec(projectFile);
+    const target = new RegExp(`/\\* ${escape(targetName)} \\*/ = \\{\\s*isa = PBXNativeTarget;[^}]*?buildPhases = \\(([^)]*)\\);`).exec(projectFile);
+    const resourcesPhaseId = target !== null ? /(\w+) \/\* Resources \*\//.exec(target[1]) : null;
+    const resourcesFiles = resourcesPhaseId !== null ? new RegExp(`${resourcesPhaseId[1]} /\\* Resources \\*/ = \\{\\s*isa = PBXResourcesBuildPhase;[^(]*files = \\(\\n`).exec(projectFile) : null;
+    if (groupChildren === null || resourcesFiles === null) {
+        throw new Error(`The group ${groupName} or the resources of the target ${targetName} were not found in the Xcode project`);
+    }
+    // Object IDs are 24 hexadecimal digits, made here from the file and target names so that they stay the same
+    /** @type {(kind: string) => string} */
+    const createId = (kind) => createHash('sha256')
+        .update(`${targetName}/${fileName}/${kind}`)
+        .digest('hex')
+        .slice(0, 24)
+        .toUpperCase();
+    const fileId = createId('file');
+    const buildFileId = createId('build');
+    projectFile = projectFile
+        .replace('/* Begin PBXBuildFile section */\n', `$&\t\t${buildFileId} /* ${fileName} in Resources */ = {isa = PBXBuildFile; fileRef = ${fileId} /* ${fileName} */; };\n`)
+        .replace('/* Begin PBXFileReference section */\n', `$&\t\t${fileId} /* ${fileName} */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = ${fileName}; sourceTree = "<group>"; };\n`)
+        .replace(groupChildren[0], `${groupChildren[0]}\t\t\t\t${fileId} /* ${fileName} */,\n`)
+        .replace(resourcesFiles[0], `${resourcesFiles[0]}\t\t\t\t${buildFileId} /* ${fileName} in Resources */,\n`);
+}
+addResource('iOS (App)', `${appName} (iOS)`, 'PrivacyInfo.xcprivacy');
 addBuildSetting('macOS (App)/Info.plist', 'ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;');
 addBuildSetting('iOS (App)/Info.plist', `CODE_SIGN_ENTITLEMENTS = "${iosEntitlementsName}";`);
 addBuildSetting('iOS (Extension)/Info.plist', `CODE_SIGN_ENTITLEMENTS = "${iosEntitlementsName}";`);
