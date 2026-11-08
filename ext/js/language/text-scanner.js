@@ -1101,7 +1101,14 @@ export class TextScanner extends EventDispatcher {
      * @returns {void}
      */
     _onTouchPointerCancel(e) {
+        const scrolled = !this._touchTapValid && !this._preventScroll;
         this._onPrimaryTouchEnd(e, 0, 0, false);
+
+        // A touch that moves and is cancelled has become a scroll. Safari on iOS sends no mousedown for it either,
+        // so without this the popup would stay where it was while the page scrolls under it.
+        if (this._browser === 'safari' && scrolled) {
+            this._triggerClear('mousedown');
+        }
     }
 
     /** */
