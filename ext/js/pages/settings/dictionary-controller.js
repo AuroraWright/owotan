@@ -849,7 +849,8 @@ export class DictionaryController {
             optionsFull = await settingsController.getOptionsFull();
         }
         if (typeof dictionaries === 'undefined') {
-            dictionaries = await settingsController.getDictionaryInfo();
+            // Not shared with a request that may have started before the settings were read
+            dictionaries = await settingsController.application.api.getDictionaryInfo();
         }
 
         /** @type {import('settings-modifications').Modification[]} */

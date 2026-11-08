@@ -482,6 +482,7 @@ export class AnkiController {
             [['term', 'kanji'], 'anki-card-all-field-menu'],
         ];
         const {templates} = this._settingsController;
+        const dictionaryInfo = await this._settingsController.getDictionaryInfo();
         for (const [types, templateName] of fieldMenuTargets) {
             const templateContent = templates.getTemplateContent(templateName);
             if (templateContent === null) {
@@ -504,7 +505,6 @@ export class AnkiController {
                 markers.push(...getStandardFieldMarkers(type, this._language));
             }
             if (types.includes('term')) {
-                const dictionaryInfo = await this._application.api.getDictionaryInfo();
                 markers.push(...getDynamicFieldMarkers(dictionaries, dictionaryInfo));
             }
             markers = [...new Set(markers.sort())];

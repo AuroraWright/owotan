@@ -141,6 +141,9 @@ Along the way it also fixes some performance and layout problems.
   made 91 preview lookups and about 300 requests for the options, about 85 MB of messages; it now makes 3 lookups and
   47 requests. As the list is made again after each import, importing dictionaries one after another grew with the
   square of their number: importing 89 made 4,150 preview lookups and 20,518 requests for the options.
+- The parts of the settings page that ask for the installed dictionaries at the same time share one request, and the
+  Anki field menus ask once instead of once per menu. Opening the settings page made 20 of these requests, 3 MB with 89
+  dictionaries; it now makes 4.
 - Fixed dictionary list bugs:
   - Overlapping list updates duplicated entries.
   - Dictionaries imported while another settings page was open could end up disabled.

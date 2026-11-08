@@ -45,6 +45,8 @@ export class SettingsController extends EventDispatcher {
         this._pageExitPreventionEventListeners = new EventListenerCollection();
         /** @type {HtmlTemplateCollection} */
         this._templates = new HtmlTemplateCollection();
+        /** @type {?Promise<import('dictionary-importer').Summary[]>} */
+        this._dictionaryInfoPromise = null;
     }
 
     /** @type {import('../../application.js').Application} */
@@ -81,6 +83,7 @@ export class SettingsController extends EventDispatcher {
     async prepare() {
         await this._templates.loadFromFiles(['/templates-settings.html']);
         this._application.on('optionsUpdated', this._onOptionsUpdated.bind(this));
+        this._application.on('databaseUpdated', this._onDatabaseUpdated.bind(this));
         if (this._canObservePermissionsChanges()) {
             chrome.permissions.onAdded.addListener(this._onPermissionsChanged.bind(this));
             chrome.permissions.onRemoved.addListener(this._onPermissionsChanged.bind(this));
@@ -191,7 +194,17 @@ export class SettingsController extends EventDispatcher {
      * @returns {Promise<import('dictionary-importer').Summary[]>}
      */
     async getDictionaryInfo() {
-        return await this._application.api.getDictionaryInfo();
+        // Several parts of the page ask for the dictionaries at the same time, so they share a request. Once the
+        // dictionaries or the options have been changed elsewhere, a new request is made.
+        if (this._dictionaryInfoPromise === null) {
+            const promise = this._application.api.getDictionaryInfo();
+            this._dictionaryInfoPromise = promise;
+            const clear = () => {
+                if (this._dictionaryInfoPromise === promise) { this._dictionaryInfoPromise = null; }
+            };
+            promise.then(clear, clear);
+        }
+        return await this._dictionaryInfoPromise;
     }
 
     /**
@@ -258,7 +271,14 @@ export class SettingsController extends EventDispatcher {
      */
     _onOptionsUpdated({source}) {
         if (source === this._source) { return; }
+        // Another page may have changed the options after importing or deleting a dictionary
+        this._dictionaryInfoPromise = null;
         void this._onOptionsUpdatedInternal(true);
+    }
+
+    /** */
+    _onDatabaseUpdated() {
+        this._dictionaryInfoPromise = null;
     }
 
     /**
