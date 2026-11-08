@@ -192,7 +192,7 @@ export class Display extends EventDispatcher {
         /** @type {OptionToggleHotkeyHandler} */
         this._optionToggleHotkeyHandler = new OptionToggleHotkeyHandler(this);
         /** @type {ElementOverflowController} */
-        this._elementOverflowController = new ElementOverflowController(this);
+        this._elementOverflowController = new ElementOverflowController(this, this._contentScrollElement);
         /** @type {boolean} */
         this._frameVisible = (pageType === 'search');
         /** @type {HTMLElement} */
@@ -1526,6 +1526,9 @@ export class Display extends EventDispatcher {
             }
 
             this._elementOverflowController.addElements(entry);
+            if (i === 0) {
+                this._elementOverflowController.checkEntryIfVisible(entry);
+            }
 
             safePerformance.mark('display:createEntryReal:end');
             safePerformance.measure('display:createEntryReal', 'display:createEntryReal:start', 'display:createEntryReal:end');

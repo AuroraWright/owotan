@@ -21,10 +21,13 @@ import {EventListenerCollection} from '../core/event-listener-collection.js';
 export class ElementOverflowController {
     /**
      * @param {import('./display.js').Display} display
+     * @param {Element} scrollElement
      */
-    constructor(display) {
+    constructor(display, scrollElement) {
         /** @type {import('./display.js').Display} */
         this._display = display;
+        /** @type {Element} */
+        this._scrollElement = scrollElement;
         /** @type {Element[]} */
         this._elements = [];
         /** @type {Map<Element, Element[]>} */
@@ -127,7 +130,7 @@ export class ElementOverflowController {
                 }
             }
             if (this._intersectionObserver === null) {
-                this._intersectionObserver = new IntersectionObserver(this._onIntersection.bind(this), {rootMargin: '100% 0px'});
+                this._intersectionObserver = new IntersectionObserver(this._onIntersection.bind(this), {root: this._scrollElement, rootMargin: '100% 0px'});
             }
             this._intersectionObserver.observe(entry);
             this._observedEntries.set(entry, elementsToUpdate);
@@ -136,6 +139,25 @@ export class ElementOverflowController {
         if (elementsToUpdate.length > 0 && this._windowEventListeners.size === 0) {
             this._windowEventListeners.addEventListener(window, 'resize', this._onWindowResizeBind, false);
         }
+    }
+
+    /**
+     * Checks an entry's elements now if it is in the visible part of the page. The observer only reports it after the
+     * page has been drawn, which would show it without its expansion buttons until then. The display only does this for
+     * the first entry: measuring the others before the page is drawn would make the browser lay out every entry added
+     * with them.
+     * @param {Element} entry
+     */
+    checkEntryIfVisible(entry) {
+        const elements = this._observedEntries.get(entry);
+        if (typeof elements === 'undefined') { return; }
+        const {top, bottom} = this._scrollElement.getBoundingClientRect();
+        const rect = entry.getBoundingClientRect();
+        if (rect.bottom <= top || rect.top >= bottom) { return; }
+        this._observedEntries.delete(entry);
+        /** @type {IntersectionObserver} */ (this._intersectionObserver).unobserve(entry);
+        this._elements.push(...elements);
+        this._updateElements(elements);
     }
 
     /** */

@@ -130,10 +130,10 @@ Along the way it also fixes some performance and layout problems.
 - A popup's entries are removed when it is hidden, instead of when the next lookup starts, which spent about 7 ms
   (up to 17 ms) on it on iOS.
 - When a lookup adds an entry, only the last entry is restyled; previously the whole list was.
-- Collapsible definitions are checked together rather than one at a time, and only once their entry comes near the
-  visible part of the popup. Checking them made the browser lay out every entry, including those that
-  `content-visibility: auto` would otherwise skip until they're scrolled to. On iOS this halved the time to show every
-  entry, from about 200 ms to about 110 ms.
+- Collapsible definitions are checked together rather than one at a time, and only once their entry comes within a
+  popup's height of the visible part, except for the first entry's, which are checked before it's drawn. Checking them
+  made the browser lay out every entry, including those that `content-visibility: auto` would otherwise skip until
+  they're scrolled to. On iOS this halved the time to show every entry, from about 200 ms to about 110 ms.
 - The popup's custom CSS and dictionary styles are set only when they change. Every lookup set them twice, so the
   browser parsed them twice and restyled the popup, about 14 ms per lookup on iOS with 130 KB of styles.
 - The settings page updates its count of enabled dictionaries, the popup preview and the "all dictionaries" select
