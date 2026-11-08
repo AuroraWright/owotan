@@ -819,8 +819,6 @@ export class DisplayAnki {
         const details = dictionaryEntryDetails[dictionaryEntryIndex].noteMap.get(cardFormatIndex);
         if (typeof details === 'undefined') { return; }
 
-        const {requirements} = details;
-
         const button = this._saveButtonFind(dictionaryEntryIndex, cardFormatIndex);
         if (button === null || button.disabled) { return; }
 
@@ -839,6 +837,9 @@ export class DisplayAnki {
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
         const overrideToken = progressIndicatorVisible.setOverride(true);
         try {
+            // The note is made twice: first to find the media that its fields use, which the duplicate check, having
+            // made only the first field, doesn't know, and then with that media.
+            const {requirements} = await this._createNote(dictionaryEntry, cardFormatIndex, []);
             const {note, errors, requirements: outputRequirements} = await this._createNote(dictionaryEntry, cardFormatIndex, requirements);
             allErrors.push(...errors);
 
@@ -1248,7 +1249,8 @@ export class DisplayAnki {
             const {type} = dictionaryEntry;
             for (const [cardFormatIndex, cardFormat] of this._cardFormats.entries()) {
                 if (cardFormat.type !== type) { continue; }
-                const notePromise = this._createNote(dictionaryEntry, cardFormatIndex, []);
+                // Duplicates are found by the first field alone, which is quicker to render than every field
+                const notePromise = this._createNote(dictionaryEntry, cardFormatIndex, [], true);
                 notePromises.push(notePromise);
                 noteTargets.push({index: i, cardFormatIndex, cardFormat});
             }
@@ -1306,10 +1308,10 @@ export class DisplayAnki {
         const results = new Array(dictionaryEntries.length).fill(null).map(() => ({noteMap: new Map()}));
 
         for (let i = 0, ii = noteInfoList.length; i < ii; ++i) {
-            const {note, errors, requirements} = noteInfoList[i];
+            const {note, errors} = noteInfoList[i];
             const {canAdd, valid, noteIds, noteInfos} = notesDupechecked[i];
             const {cardFormatIndex, cardFormat, index} = noteTargets[i];
-            results[index].noteMap.set(cardFormatIndex, {cardFormat, note, errors, requirements, canAdd, valid, noteIds, noteInfos, ankiError});
+            results[index].noteMap.set(cardFormatIndex, {cardFormat, note, errors, canAdd, valid, noteIds, noteInfos, ankiError});
         }
         return results;
     }
@@ -1344,13 +1346,17 @@ export class DisplayAnki {
      * @param {import('dictionary').DictionaryEntry} dictionaryEntry
      * @param {number} cardFormatIndex
      * @param {import('anki-note-builder').Requirement[]} requirements
+     * @param {boolean} [firstFieldOnly] Whether to make only the note's first field, which is all a duplicate check uses.
      * @returns {Promise<import('display-anki').CreateNoteResult>}
      */
-    async _createNote(dictionaryEntry, cardFormatIndex, requirements) {
+    async _createNote(dictionaryEntry, cardFormatIndex, requirements, firstFieldOnly = false) {
         const context = this._noteContext;
         if (context === null) { throw new Error('Note context not initialized'); }
-        const cardFormat = this._cardFormats?.[cardFormatIndex];
+        let cardFormat = this._cardFormats?.[cardFormatIndex];
         if (typeof cardFormat === 'undefined') { throw new Error('Unsupported note type}'); }
+        if (firstFieldOnly) {
+            cardFormat = {...cardFormat, fields: Object.fromEntries(Object.entries(cardFormat.fields).slice(0, 1))};
+        }
         if (!this._ankiFieldTemplates) {
             const options = this._display.getOptions();
             if (options) {

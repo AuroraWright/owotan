@@ -39,9 +39,9 @@ export type DictionaryEntryDetails = {
 
 export type DictionaryEntryNoteDetails = {
     cardFormat: Settings.AnkiCardFormat;
+    /** A note with only the first field, which is what duplicate checks use. */
     note: Anki.Note;
     errors: Error[];
-    requirements: AnkiNoteBuilder.Requirement[];
     canAdd: boolean;
     valid: boolean;
     /**

@@ -117,6 +117,9 @@ Along the way it also fixes some performance and layout problems.
 - Anki duplicate checks render each field marker once per dictionary entry, and dictionary styles are scoped and
   sanitized once instead of per definition and per note. A word with 158 definitions went from 448 renders (2.35 s)
   to 126 renders (0.23 s).
+- Anki duplicate checks render only each note's first field, which is all they use, and send only it to the background
+  page; the other fields are rendered when the note is added. On iOS this cut the check's message from about 500 KB
+  (up to 6.8 MB) to about 10 KB.
 - Auto-play audio starts once the first entry is shown, instead of after every entry. The 400 ms delay before it is
   kept only for lookups made by hovering a mouse or pen, so taps and clicks play sooner: on iOS, audio started about
   240 ms after a tap instead of 700 ms.
