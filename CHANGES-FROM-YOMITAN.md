@@ -83,13 +83,11 @@ Along the way it also fixes some performance and layout problems.
     now notices this from a check that runs late, so the extension still reloads.
   - Timeouts for messages between a page and its popups, and for connecting a popup, wait again when they run late
     because the page was frozen, instead of failing as soon as Safari returns.
-- **Background page priority on macOS.**
-  - Because of a WebKit bug, Safari on macOS runs the background page at a low priority: only on the efficiency
-    cores, with its disk reads throttled. Lookups took 1–6 s, and up to 15 s after Safari launched or while the Mac
-    was busy. When the background page starts, the extension opens a page of its own in a tab that isn't selected
-    and reloads itself. Safari then runs the new background page in that page's process, at a normal priority, and
-    the tab closes after about a second. Lookups take about 100 ms.
-  - The backend makes a lookup when it starts, so the dictionaries are loaded before the first lookup on a page.
+- **Background page priority on macOS.** Because of a WebKit bug, Safari on macOS runs the background page at a low
+  priority: only on the efficiency cores, with its disk reads throttled. Lookups took 1–6 s, and up to 15 s after
+  Safari launched or while the Mac was busy. When the background page starts, the extension opens a page of its own
+  in a tab that isn't selected and reloads itself. Safari then runs the new background page in that page's process,
+  at a normal priority, and the tab closes after about a second. Lookups take about 100 ms.
 - **Exports on iOS.** Exported settings and Anki decks go to the share sheet, since Safari on iOS can't download
   files from extension pages.
 - **Layout on small screens.**
@@ -166,6 +164,9 @@ Along the way it also fixes some performance and layout problems.
 - A mouse button press is recognized from the button that was pressed, not only from the buttons held when the event
   was made. In Safari on macOS those were usually missing a short press, as from a mouse that sends a side button's
   release with its press, so scanning with mouse3 and detecting it in the settings rarely worked.
+- The background page makes a lookup when it starts, except on Android, so the dictionaries are already loaded for
+  the first lookup on a page. In Chromium this made the first lookup after the browser started about 90 ms faster
+  (450 ms to 366 ms). In Safari, whose background page can run at a low priority, loading them had taken 5 s.
 - The progress bar for audio that never loads goes away when other audio is played or the popup shows another lookup.
   Previously it stayed until the popup was reloaded. In Safari this happened when a request for audio never got an
   answer, which Safari allows when the background page stops while answering.

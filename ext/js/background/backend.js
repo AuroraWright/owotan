@@ -411,8 +411,12 @@ export class Backend {
                 void this._openWelcomeGuidePageOnce();
             }
 
-            if (this._environment.getInfo().browser === 'safari') {
+            const {browser, platform: {os}} = this._environment.getInfo();
+            if (browser === 'safari') {
                 void this._prepareSafariBackground();
+            } else if (os !== 'android') {
+                // Android stops the background page more often, and the lookup would use its battery each time
+                void this._warmUpLookups();
             }
 
             this._clipboardMonitor.on('change', this._onClipboardTextChange.bind(this));
@@ -516,8 +520,10 @@ export class Backend {
 
     /**
      * Makes a lookup when the backend starts, which loads the dictionaries and the code that lookups run, so that the
-     * first lookup on a page doesn't wait for them. Safari runs the backend at a low priority while no extension page
-     * is shown, and much lower still while it starts, when they took 5 s and made the first lookup take 10 s.
+     * first lookup on a page doesn't wait for them. In Chromium that saved about 90 ms of the first lookup after the
+     * browser started. In Safari, where the background page can run at a low priority, they took 5 s and made the
+     * first lookup take 10 s. On Chromium the dictionaries stay loaded in the offscreen document while the service
+     * worker restarts, so the lookups that later restarts make are quick.
      */
     async _warmUpLookups() {
         try {
