@@ -1,7 +1,7 @@
 {
     "manifest": {
         "manifest_version": 3,
-        "name": "Yomitan Popup Dictionary",
+        "name": "OwOtan Popup Dictionary",
         "version": "$YOMITAN_VERSION",
         "description": "Popup dictionary for language learning",
         "author": {
@@ -26,7 +26,7 @@
                 "64": "images/icon64.png",
                 "128": "images/icon128.png"
             },
-            "default_title": "Yomitan",
+            "default_title": "OwOtan",
             "default_popup": "action-popup.html"
         },
         "background": {

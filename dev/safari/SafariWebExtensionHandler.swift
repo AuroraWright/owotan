@@ -112,7 +112,7 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     /// Starts the app that holds this extension, without a window, to serve the Yomitan API on the port, or has
     /// the running app serve on it.
     private static func startApiServer(port: Int) -> [String: Any] {
-        // The app extension is at Yomitan.app/Contents/PlugIns/<name>.appex
+        // The app extension is at OwOtan.app/Contents/PlugIns/<name>.appex
         let appUrl = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         // The sandbox does not let the app extension read the app's bundle, but the app extension's identifier is the
         // app's followed by its own name.
@@ -123,7 +123,7 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         if !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty {
             // Sandboxed processes can only send a notification's object, and the app's AppDelegate.swift reads it.
             // The app then serves, if the user opened it, or serves on that port.
-            DistributedNotificationCenter.default().postNotificationName(Notification.Name("org.yomitan.api.port"), object: String(port), userInfo: nil, deliverImmediately: true)
+            DistributedNotificationCenter.default().postNotificationName(Notification.Name("org.owotan.api.port"), object: String(port), userInfo: nil, deliverImmediately: true)
             return ["started": false]
         }
         guard #available(macOS 10.15, *) else {
@@ -339,7 +339,7 @@ enum LocalAudioDatabase {
         lock.lock()
         defer { lock.unlock() }
         guard let database = open() else {
-            return ["error": "\(fileName) was not found. Copy it to On My iPhone › Yomitan in the Files app, then open the Yomitan app."]
+            return ["error": "\(fileName) was not found. Copy it to On My iPhone › OwOtan in the Files app, then open the OwOtan app."]
         }
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {

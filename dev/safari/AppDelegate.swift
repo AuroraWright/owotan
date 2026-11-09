@@ -70,7 +70,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 final class YomitanApiServer {
     /// The distributed notification with which the app extension asks the running app to serve, with the port as
     /// its object.
-    static let portNotificationName = Notification.Name("org.yomitan.api.port")
+    static let portNotificationName = Notification.Name("org.owotan.api.port")
     /// How long to wait before listening again when the port is in use, such as by another browser's native component.
     private static let listenRetryDelay: TimeInterval = 5
     /// The version of the native messaging component that this stands in for.
@@ -198,7 +198,7 @@ final class YomitanApiServer {
             connection.respondJson(status: 200, json: Data("{\"version\": \(Self.version)}".utf8))
         default:
             guard Date().timeIntervalSince(lastPoll) <= Self.extensionTimeout || !waitingPolls.isEmpty else {
-                connection.respondJson(status: 503, json: Data("\"Yomitan is not connected. Enable the Yomitan API in Yomitan's settings in Safari.\"".utf8))
+                connection.respondJson(status: 503, json: Data("\"OwOtan is not connected. Enable the Yomitan API in OwOtan's settings in Safari.\"".utf8))
                 return
             }
             let message: [String: Any] = ["action": action, "params": request.queryParameters, "body": String(decoding: request.body, as: UTF8.self)]
@@ -273,7 +273,7 @@ final class YomitanApiServer {
         } else if takenRequests.removeValue(forKey: pendingRequest.id) == nil {
             return
         }
-        pendingRequest.connection.respondJson(status: 504, json: Data("\"Yomitan did not answer in time\"".utf8))
+        pendingRequest.connection.respondJson(status: 504, json: Data("\"OwOtan did not answer in time\"".utf8))
     }
 }
 

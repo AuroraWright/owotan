@@ -125,7 +125,7 @@ export class YomitanApiAppConnection {
     async _startApp() {
         try {
             const port = Number.parseInt(new URL(this._serverUrl).port || '80', 10);
-            await sendAppExtensionMessage({action: 'startApiServer', port}, 'Could not start the Yomitan app, which serves the Yomitan API');
+            await sendAppExtensionMessage({action: 'startApiServer', port}, 'Could not start the OwOtan app, which serves the Yomitan API');
         } catch (e) {
             log.error(toError(e));
         }

@@ -2055,7 +2055,7 @@ export class Backend {
             if (options.general.enableContextMenuScanSelected) {
                 chrome.contextMenus.create({
                     id: 'yomitan_lookup',
-                    title: 'Lookup in Yomitan',
+                    title: 'Lookup in OwOtan',
                     contexts: ['selection'],
                 }, () => this._checkLastError(chrome.runtime.lastError));
                 chrome.contextMenus.onClicked.addListener((info) => {

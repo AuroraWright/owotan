@@ -61,7 +61,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 /// the app shares with the app extension. The copy is a clone, which takes no more space until either file changes.
 enum LocalAudioStorage {
     private static let fileName = "android.db"
-    private static let queue = DispatchQueue(label: "org.yomitan.local-audio-storage", qos: .utility)
+    private static let queue = DispatchQueue(label: "org.owotan.local-audio-storage", qos: .utility)
 
     /// Copies the file again if it changed, and deletes the copy if the user deleted the file.
     static func update() {
@@ -123,6 +123,6 @@ enum AnkiMobileInfoStorage {
         } catch {
             return "The decks and note types could not be saved: \(error.localizedDescription)"
         }
-        return "Yomitan has the decks and note types from AnkiMobile. You can go back to Safari."
+        return "OwOtan has the decks and note types from AnkiMobile. You can go back to Safari."
     }
 }

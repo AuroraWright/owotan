@@ -26,7 +26,7 @@
 // With --team, Xcode signs the app for development with a certificate of that team, and creates or downloads
 // the provisioning profiles it needs.
 //
-// --ipa archives the app for iOS and exports it as builds/yomitan-safari-app/ipa/Yomitan.ipa, to install on
+// --ipa archives the app for iOS and exports it as builds/yomitan-safari-app/ipa/OwOtan.ipa, to install on
 // devices. --identity picks the type of certificate that exporting signs it with: "Apple Development" (the
 // default), or "Apple Distribution" for ad hoc distribution. Xcode picks the newest certificate of the type.
 // Either way it installs only on the devices that the team has registered.
@@ -46,7 +46,7 @@ const rootDirectory = path.join(dirname, '..', '..');
 const buildsDirectory = path.join(rootDirectory, 'builds');
 const extensionDirectory = path.join(buildsDirectory, 'yomitan-safari');
 const appDirectory = path.join(buildsDirectory, 'yomitan-safari-app');
-const appName = 'Yomitan';
+const appName = 'OwOtan';
 
 /** @type {Record<string, {scheme: string, destination: string, products: string}>} */
 const platforms = {
@@ -80,7 +80,7 @@ const {values: args} = parseArgs({
         'team': {type: 'string'},
         'identity': {type: 'string'},
         'ipa': {type: 'boolean', default: false},
-        'bundle-id': {type: 'string', default: 'org.yomitan.dev'},
+        'bundle-id': {type: 'string', default: 'org.owotan.dev'},
         'project-only': {type: 'boolean', default: false},
     },
 });
