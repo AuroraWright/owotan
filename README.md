@@ -1,7 +1,7 @@
 # OwOtan
 
 > [!NOTE]
-> OwOtan is a fork of Yomitan with Safari support on iOS and macOS and a new dictionary engine. See [CHANGES-FROM-YOMITAN.md](./CHANGES-FROM-YOMITAN.md) for what it changes and adds.
+> OwOtan is a fork of Yomitan with Safari support on iOS and macOS and [bee's Hoshidicts fork](https://github.com/bee-san/hoshidicts) as its dictionary engine, plus several performance enhancements. See [CHANGES-FROM-YOMITAN.md](./CHANGES-FROM-YOMITAN.md) for what it changes and adds.
 
 [![Get Yomitan for Chrome](<https://img.shields.io/chrome-web-store/v/likgccmbimhjbgkjambclfkhldnlhbnn?logo=Google%20Chrome&style=for-the-badge&logoColor=lightblue&color=lightblue&label=get%20yomitan%20for%20chrome%20(stable)>)](https://chrome.google.com/webstore/detail/yomitan/likgccmbimhjbgkjambclfkhldnlhbnn)
 [![Get Yomitan for Firefox](<https://img.shields.io/amo/v/yomitan?logo=Firefox&style=for-the-badge&color=orange&label=get%20yomitan%20for%20firefox%20(stable)>)](https://addons.mozilla.org/en-US/firefox/addon/yomitan/)
