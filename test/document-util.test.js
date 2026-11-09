@@ -20,6 +20,7 @@ import {fileURLToPath} from 'node:url';
 import path from 'path';
 import {afterAll, describe, expect, test} from 'vitest';
 import {parseJson} from '../dev/json.js';
+import {getActiveButtons} from '../ext/js/dom/document-util.js';
 import {DOMTextScanner} from '../ext/js/dom/dom-text-scanner.js';
 import {TextSourceElement} from '../ext/js/dom/text-source-element.js';
 import {TextSourceGenerator} from '../ext/js/dom/text-source-generator.js';
@@ -239,6 +240,20 @@ describe('Document utility tests', () => {
                     source.cleanup();
                 });
             }
+        });
+
+        describe('getActiveButtons', () => {
+            test('includes the button of a press that is missing from buttons', () => {
+                // Safari on macOS, for a press whose release the mouse sent with it
+                expect(getActiveButtons(new window.MouseEvent('mousedown', {button: 3, buttons: 0}))).toStrictEqual(['mouse3']);
+                expect(getActiveButtons(new window.MouseEvent('mousedown', {button: 1, buttons: 0}))).toStrictEqual(['mouse2']);
+                expect(getActiveButtons(new window.MouseEvent('mousedown', {button: 2, buttons: 0x1}))).toStrictEqual(['mouse0', 'mouse1']);
+            });
+            test('does not add a button for other events', () => {
+                expect(getActiveButtons(new window.MouseEvent('mousemove', {button: 0, buttons: 0}))).toStrictEqual([]);
+                expect(getActiveButtons(new window.MouseEvent('mouseup', {button: 3, buttons: 0}))).toStrictEqual([]);
+                expect(getActiveButtons(new window.MouseEvent('mousemove', {button: 0, buttons: 0x8}))).toStrictEqual(['mouse3']);
+            });
         });
     });
 
