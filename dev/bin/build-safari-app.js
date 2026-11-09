@@ -31,8 +31,17 @@
 // default), or "Apple Distribution" for ad hoc distribution. Xcode picks the newest certificate of the type.
 // Either way it installs only on the devices that the team has registered.
 //
-// node dev/bin/build-safari-app.js [--platform macos|ios-simulator|ios] [--team <id>] [--ipa [--identity <type>]]
-//     [--bundle-id <id>] [--project-only]
+// --app-store archives the app for iOS and exports it for App Store Connect, signed with an Apple Distribution
+// certificate, as builds/yomitan-safari-app/ipa/OwOtan.ipa. The App Store does not allow the app extension to play
+// audio, so audio plays in the page, where Safari needs a gesture before it plays. With --upload, exporting uploads it to App Store
+// Connect instead, through the account signed in to Xcode, where it can be tested with TestFlight. App Store
+// Connect needs each upload to have a higher build number, so --app-store needs --version.
+//
+// --version sets the version of the extension, as `npm run build -- --version` does, and the version and build
+// number of the app. It is up to three numbers separated by periods, such as 20261109.3.
+//
+// node dev/bin/build-safari-app.js [--platform macos|ios-simulator|ios] [--team <id>] [--version <version>]
+//     [--ipa [--identity <type>] | --app-store [--upload]] [--bundle-id <id>] [--project-only]
 
 import {execFileSync} from 'child_process';
 import {createHash} from 'crypto';
@@ -68,9 +77,10 @@ const ipaExportMethods = {
 /**
  * @param {string} command
  * @param {string[]} args
+ * @param {Record<string, string | undefined>} [env]
  */
-function run(command, args) {
-    execFileSync(command, args, {cwd: rootDirectory, stdio: 'inherit'});
+function run(command, args, env = process.env) {
+    execFileSync(command, args, {cwd: rootDirectory, stdio: 'inherit', env});
 }
 
 const {values: args} = parseArgs({
@@ -80,6 +90,9 @@ const {values: args} = parseArgs({
         'team': {type: 'string'},
         'identity': {type: 'string'},
         'ipa': {type: 'boolean', default: false},
+        'app-store': {type: 'boolean', default: false},
+        'upload': {type: 'boolean', default: false},
+        'version': {type: 'string'},
         'bundle-id': {type: 'string', default: 'org.owotan.dev'},
         'project-only': {type: 'boolean', default: false},
     },
@@ -103,8 +116,26 @@ const ipaExportMethod = ipaExportMethods[identity];
 if (typeof ipaExportMethod === 'undefined') {
     throw new Error(`An IPA is signed with one of ${Object.keys(ipaExportMethods).join(', ')}`);
 }
+const version = args.version;
+if (typeof version === 'string' && !/^\d+(\.\d+){0,2}$/.test(version)) {
+    throw new Error(`The version ${version} is not up to three numbers separated by periods`);
+}
+if (args['app-store']) {
+    if (args.platform !== 'ios' || typeof team !== 'string') {
+        throw new Error('--app-store is for --platform ios with --team');
+    }
+    if (args.ipa) {
+        throw new Error('--app-store exports its own IPA; pass either --ipa or --app-store');
+    }
+    if (typeof version !== 'string') {
+        throw new Error('App Store Connect needs a higher build number for each upload; pass --version');
+    }
+}
+if (args.upload && !args['app-store']) {
+    throw new Error('--upload sends a build for App Store Connect; pass --app-store');
+}
 
-run('node', [path.join(dirname, 'build.js'), '--target', 'safari']);
+run('node', [path.join(dirname, 'build.js'), '--target', 'safari', ...(typeof version === 'string' ? ['--version', version] : [])]);
 // The project gets its own copy of the extension, so that rebuilding the extension does not change it.
 run('xcrun', ['safari-web-extension-converter', '--project-location', appDirectory, '--app-name', appName, '--bundle-identifier', args['bundle-id'], '--swift', '--copy-resources', '--no-open', '--no-prompt', '--force', extensionDirectory]);
 // The extension sends native messages to the app extension, which this handler answers.
@@ -121,12 +152,27 @@ const iosAppInfoPath = path.join(appDirectory, appName, 'iOS (App)', 'Info.plist
 for (const key of ['UIFileSharingEnabled', 'LSSupportsOpeningDocumentsInPlace']) {
     run('plutil', ['-replace', key, '-bool', 'YES', iosAppInfoPath]);
 }
+// The app uses no encryption other than the system's, such as HTTPS, which export regulations exempt. Saying so
+// here saves answering for each build that App Store Connect receives.
+run('plutil', ['-replace', 'ITSAppUsesNonExemptEncryption', '-bool', 'NO', iosAppInfoPath]);
 // AnkiMobile gives its decks and note types to an app, by opening the app's link (SceneDelegate.swift). The link's
 // scheme is the app's identifier, so that builds with other identifiers do not take each other's links.
 run('plutil', ['-replace', 'CFBundleURLTypes', '-json', '[{"CFBundleURLName": "$(PRODUCT_BUNDLE_IDENTIFIER)", "CFBundleURLSchemes": ["$(PRODUCT_BUNDLE_IDENTIFIER)"]}]', iosAppInfoPath]);
-// The app extension plays audio for the extension (SafariWebExtensionHandler.swift). iOS runs it in the background,
-// where only a process with the background mode for audio can start audio.
-run('plutil', ['-replace', 'UIBackgroundModes', '-json', '["audio"]', path.join(appDirectory, appName, 'iOS (Extension)', 'Info.plist')]);
+if (args['app-store']) {
+    // The App Store does not allow an app extension to have a background mode, so the extension plays audio in the
+    // page instead of through the app extension (ext/js/media/safari-audio.js).
+    const safariAudioPath = path.join(appDirectory, appName, 'Shared (Extension)', 'Resources', 'js', 'media', 'safari-audio.js');
+    const safariAudio = fs.readFileSync(safariAudioPath, {encoding: 'utf8'});
+    const nativeAudioSetting = 'export const safariNativeAudio = true;';
+    if (!safariAudio.includes(nativeAudioSetting)) {
+        throw new Error(`${safariAudioPath} does not contain ${nativeAudioSetting}`);
+    }
+    fs.writeFileSync(safariAudioPath, safariAudio.replace(nativeAudioSetting, 'export const safariNativeAudio = false;'));
+} else {
+    // The app extension plays audio for the extension (SafariWebExtensionHandler.swift). iOS runs it in the background,
+    // where only a process with the background mode for audio can start audio.
+    run('plutil', ['-replace', 'UIBackgroundModes', '-json', '["audio"]', path.join(appDirectory, appName, 'iOS (Extension)', 'Info.plist')]);
+}
 const iosEntitlementsName = `${appName} (iOS).entitlements`;
 fs.writeFileSync(path.join(appDirectory, appName, iosEntitlementsName), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -195,6 +241,15 @@ if ([...projectFile.matchAll(iosDeploymentTargetPattern)].length === 0) {
     throw new Error('The Xcode project sets no iOS deployment target');
 }
 projectFile = projectFile.replace(iosDeploymentTargetPattern, 'IPHONEOS_DEPLOYMENT_TARGET = 18.0;');
+if (typeof version === 'string') {
+    for (const setting of ['MARKETING_VERSION', 'CURRENT_PROJECT_VERSION']) {
+        const pattern = new RegExp(`${setting} = [^;]*;`, 'g');
+        if ([...projectFile.matchAll(pattern)].length === 0) {
+            throw new Error(`The Xcode project sets no ${setting}`);
+        }
+        projectFile = projectFile.replace(pattern, `${setting} = ${version};`);
+    }
+}
 // Automatic signing registers the group, and adds it to the profiles, only for the targets that have it as a capability.
 for (const targetName of [`${appName} (iOS)`, `${appName} Extension (iOS)`]) {
     const target = new RegExp(`(\\w+) /\\* ${targetName.replace(/[()]/g, '\\$&')} \\*/ = \\{\\s*isa = PBXNativeTarget;`).exec(projectFile);
@@ -225,7 +280,7 @@ if (typeof team === 'string') {
 const projectPath = path.join(appDirectory, appName, `${appName}.xcodeproj`);
 const derivedDataPath = path.join(appDirectory, 'DerivedData');
 const buildArgs = ['-project', projectPath, '-scheme', platform.scheme, '-configuration', 'Release', '-destination', platform.destination, '-derivedDataPath', derivedDataPath, ...signing];
-if (!args.ipa) {
+if (!args.ipa && !args['app-store']) {
     run('xcodebuild', [...buildArgs, 'build']);
     console.log(`Built ${path.join(derivedDataPath, 'Build', 'Products', platform.products, `${appName}.app`)}`);
     process.exit(0);
@@ -235,19 +290,34 @@ const archivePath = path.join(appDirectory, `${appName}.xcarchive`);
 const exportPath = path.join(appDirectory, 'ipa');
 const exportOptionsPath = path.join(appDirectory, 'ExportOptions.plist');
 run('xcodebuild', [...buildArgs, '-archivePath', archivePath, 'archive']);
+// For App Store Connect, exporting would otherwise give the build a number of its own instead of --version
+const appStoreOptions = args['app-store'] ?
+    `
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
+    <key>destination</key>
+    <string>${args.upload ? 'upload' : 'export'}</string>` :
+    '';
 fs.writeFileSync(exportOptionsPath, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>method</key>
-    <string>${ipaExportMethod}</string>
+    <string>${args['app-store'] ? 'app-store-connect' : ipaExportMethod}</string>
     <key>signingStyle</key>
     <string>automatic</string>
     <key>teamID</key>
-    <string>${team}</string>
+    <string>${team}</string>${appStoreOptions}
 </dict>
 </plist>
 `);
 fs.rmSync(exportPath, {recursive: true, force: true});
-run('xcodebuild', ['-exportArchive', '-archivePath', archivePath, '-exportPath', exportPath, '-exportOptionsPlist', exportOptionsPath, '-allowProvisioningUpdates']);
-console.log(`Built ${path.join(exportPath, `${appName}.ipa`)}`);
+// Exporting copies the app with /usr/bin/rsync, which starts the rsync it finds first on the PATH for the other end
+// of the copy, and fails if that is another version of rsync, such as Homebrew's
+const exportEnv = {...process.env, PATH: `/usr/bin:${process.env.PATH ?? ''}`};
+run('xcodebuild', ['-exportArchive', '-archivePath', archivePath, '-exportPath', exportPath, '-exportOptionsPlist', exportOptionsPath, '-allowProvisioningUpdates'], exportEnv);
+if (args.upload) {
+    console.log(`Uploaded ${appName} ${version} to App Store Connect`);
+} else {
+    console.log(`Built ${path.join(exportPath, `${appName}.ipa`)}`);
+}

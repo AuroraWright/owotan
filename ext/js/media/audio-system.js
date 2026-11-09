@@ -22,6 +22,8 @@ import {isLocalNetworkUrl} from '../core/utilities.js';
 import {NativeAudio} from './native-audio.js';
 import {TextToSpeechAudio} from './text-to-speech-audio.js';
 
+/** @typedef {HTMLAudioElement|NativeAudio|import('./shared-audio-element.js').SharedElementAudio} AudioElement */
+
 /**
  * @augments EventDispatcher<import('audio-system').Events>
  */
@@ -30,10 +32,13 @@ export class AudioSystem extends EventDispatcher {
      * @param {API?} api
      * @param {boolean} nativeAudio Whether the app extension plays audio from URLs, in Safari, for which audio is then
      *   downloaded with the API.
+     * @param {?import('./shared-audio-element.js').SharedAudioElement} [sharedAudioElement] The element to play audio
+     *   from URLs on, in Safari builds where the app extension does not play audio, which then download audio with the
+     *   API.
      */
-    constructor(api, nativeAudio) {
+    constructor(api, nativeAudio, sharedAudioElement = null) {
         super();
-        /** @type {?(HTMLAudioElement|NativeAudio)} */
+        /** @type {?AudioElement} */
         this._fallbackAudio = null;
         /** @type {?import('settings').FallbackSoundType} */
         this._fallbackSoundType = null;
@@ -41,6 +46,8 @@ export class AudioSystem extends EventDispatcher {
         this._api = api;
         /** @type {boolean} */
         this._nativeAudio = nativeAudio;
+        /** @type {?import('./shared-audio-element.js').SharedAudioElement} */
+        this._sharedAudioElement = sharedAudioElement;
     }
 
     /**
@@ -58,7 +65,7 @@ export class AudioSystem extends EventDispatcher {
 
     /**
      * @param {import('settings').FallbackSoundType} fallbackSoundType
-     * @returns {HTMLAudioElement|NativeAudio}
+     * @returns {AudioElement}
      */
     getFallbackAudio(fallbackSoundType) {
         if (this._fallbackAudio === null || this._fallbackSoundType !== fallbackSoundType) {
@@ -82,13 +89,18 @@ export class AudioSystem extends EventDispatcher {
     /**
      * @param {string} url
      * @param {import('settings').AudioSourceType} sourceType
-     * @returns {Promise<HTMLAudioElement|NativeAudio>}
+     * @returns {Promise<AudioElement>}
      */
     async createAudio(url, sourceType) {
         if (this._nativeAudio && this._api !== null) {
             // The audio is checked as it is downloaded, as the app extension only gets it to play.
             const {data} = await this._api.downloadAudio(url, sourceType);
             return NativeAudio.fromData(this._api, data);
+        }
+        if (this._sharedAudioElement !== null && this._api !== null) {
+            // The shared element cannot load audio before it plays, so the audio is downloaded and checked here.
+            const {data, contentType} = await this._api.downloadAudio(url, sourceType);
+            return this._sharedAudioElement.createAudio(`data:${contentType ?? 'audio/mpeg'};base64,${data}`);
         }
 
         // Audio on this device or its local network is downloaded by the background page and played from its data,
@@ -124,10 +136,13 @@ export class AudioSystem extends EventDispatcher {
 
     /**
      * @param {string} url
-     * @returns {HTMLAudioElement|NativeAudio}
+     * @returns {AudioElement}
      */
     _createAudioElement(url) {
-        return this._nativeAudio && this._api !== null ? NativeAudio.fromUrl(this._api, url) : new Audio(url);
+        if (this._nativeAudio && this._api !== null) {
+            return NativeAudio.fromUrl(this._api, url);
+        }
+        return this._sharedAudioElement !== null ? this._sharedAudioElement.createAudio(url) : new Audio(url);
     }
 
     /**

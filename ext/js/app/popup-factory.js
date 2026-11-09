@@ -358,6 +358,16 @@ export class PopupFactory {
         return popup.isPointerOver();
     }
 
+    /**
+     * Lets a popup play audio later without a gesture of its own, when called while a gesture is handled.
+     * @param {string} id The identifier of the popup.
+     * @returns {boolean} Whether the popup could be sent the gesture, which it cannot before its frame has loaded.
+     */
+    unlockAudio(id) {
+        const popup = this._popups.get(id);
+        return typeof popup !== 'undefined' && popup.unlockAudio();
+    }
+
     // Private functions
 
     /**

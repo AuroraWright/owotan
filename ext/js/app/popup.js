@@ -386,6 +386,21 @@ export class Popup extends EventDispatcher {
     }
 
     /**
+     * Lets the popup play audio later without a gesture of its own, when called while a gesture is handled. Safari
+     * plays audio only after a gesture has started it, and the message sent to the frame here carries the gesture.
+     * @returns {boolean} Whether the frame could be sent the gesture, which it cannot before it has loaded.
+     */
+    unlockAudio() {
+        if (this._invokeWindow('displayAudioUnlock', void 0)) { return true; }
+        // Safari carries a gesture for about a second, which loading the frame for the first lookup would take longer
+        // than, so the frame is loaded now. Errors are reported when the popup is shown.
+        if (this._optionsContext !== null) {
+            this._inject().catch(() => {});
+        }
+        return false;
+    }
+
+    /**
      * Returns whether or not the popup is currently visible, synchronously.
      * @returns {boolean} `true` if the popup is visible, `false` otherwise.
      */
@@ -845,15 +860,17 @@ export class Popup extends EventDispatcher {
      * @template {import('display').WindowApiNames} TName
      * @param {TName} action
      * @param {import('display').WindowApiParams<TName>} params
+     * @returns {boolean} Whether the message was sent.
      */
     _invokeWindow(action, params) {
         const contentWindow = this._frame.contentWindow;
-        if (this._frameClient === null || !this._frameClient.isConnected() || contentWindow === null) { return; }
+        if (this._frameClient === null || !this._frameClient.isConnected() || contentWindow === null) { return false; }
 
         /** @type {import('display').WindowApiMessage<TName>} */
         const message = {action, params};
         const messageWrapper = this._frameClient.createMessage(message);
         contentWindow.postMessage(messageWrapper, this._targetOrigin);
+        return true;
     }
 
     /**

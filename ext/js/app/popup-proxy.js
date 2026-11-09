@@ -242,6 +242,21 @@ export class PopupProxy extends EventDispatcher {
     }
 
     /**
+     * Lets the popup play audio later without a gesture of its own, when called while a gesture is handled. A
+     * cross-frame message does not carry the gesture, but a window message does, so the frame that hosts the popup,
+     * which contains this frame, is sent one.
+     * @returns {boolean} `true`, as the frame that hosts the popup sends it the gesture when it can.
+     */
+    unlockAudio() {
+        const host = this._frameId === 0 ? window.top : window.parent;
+        if (host === null || host === window) { return true; }
+        /** @type {import('frontend').UnlockAudioMessage} */
+        const message = {action: 'frontendUnlockAudio', params: {id: this._id}};
+        host.postMessage(message, '*');
+        return true;
+    }
+
+    /**
      * Returns whether or not the popup is currently visible, synchronously.
      * @throws An exception is thrown for `PopupProxy` since it cannot synchronously detect visibility.
      */

@@ -21,6 +21,8 @@ import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {getRequiredAudioSourceList} from '../media/audio-downloader.js';
 import {AudioSystem} from '../media/audio-system.js';
+import {safariNativeAudio} from '../media/safari-audio.js';
+import {SharedAudioElement} from '../media/shared-audio-element.js';
 
 export class DisplayAudio {
     /**
@@ -31,8 +33,11 @@ export class DisplayAudio {
         this._display = display;
         /** @type {?import('display-audio').GenericAudio} */
         this._audioPlaying = null;
+        const safari = display.browser === 'safari';
+        /** @type {?SharedAudioElement} */
+        this._sharedAudioElement = safari && !safariNativeAudio ? new SharedAudioElement() : null;
         /** @type {AudioSystem} */
-        this._audioSystem = new AudioSystem(this._display.application.api, display.browser === 'safari');
+        this._audioSystem = new AudioSystem(this._display.application.api, safari && safariNativeAudio, this._sharedAudioElement);
         /** @type {number} */
         this._playbackVolume = 1;
         /** @type {boolean} */
@@ -105,7 +110,18 @@ export class DisplayAudio {
         this._display.registerDirectMessageHandlers([
             ['displayAudioClearAutoPlayTimer', this._onMessageClearAutoPlayTimer.bind(this)],
         ]);
+        this._display.registerWindowMessageHandlers([
+            ['displayAudioUnlock', this._unlockAudio.bind(this)],
+        ]);
         /* eslint-enable @stylistic/no-multi-spaces */
+        if (this._sharedAudioElement !== null) {
+            // Audio plays in Safari once a gesture has started it, so any touch, click, or key press in the popup lets
+            // audio play later.
+            const unlockAudio = this._unlockAudio.bind(this);
+            for (const type of ['touchend', 'mousedown', 'keydown']) {
+                document.addEventListener(type, unlockAudio, {capture: true, passive: true});
+            }
+        }
         this._display.on('optionsUpdated', this._onOptionsUpdated.bind(this));
         this._display.on('contentClear', this._onContentClear.bind(this));
         this._display.on('contentUpdateEntry', this._onContentUpdateEntry.bind(this));
@@ -285,6 +301,15 @@ export class DisplayAudio {
     /** @type {import('display').DirectApiHandler<'displayAudioClearAutoPlayTimer'>} */
     _onMessageClearAutoPlayTimer() {
         this.clearAutoPlayTimer();
+    }
+
+    /**
+     * Called while a gesture is handled: one in the popup, or one on the page, whose message carries the gesture.
+     */
+    _unlockAudio() {
+        if (this._sharedAudioElement !== null) {
+            this._sharedAudioElement.unlock();
+        }
     }
 
     /**

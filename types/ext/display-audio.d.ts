@@ -16,6 +16,7 @@
  */
 
 import type {NativeAudio} from '../../ext/js/media/native-audio';
+import type {SharedElementAudio} from '../../ext/js/media/shared-audio-element';
 import type {TextToSpeechAudio} from '../../ext/js/media/text-to-speech-audio';
 import type * as Audio from './audio';
 import type * as AudioDownloader from './audio-downloader';
@@ -95,7 +96,7 @@ export type CreateAudioResult = {
     cacheUpdated: boolean;
 };
 
-export type GenericAudio = HTMLAudioElement | TextToSpeechAudio | NativeAudio;
+export type GenericAudio = HTMLAudioElement | TextToSpeechAudio | NativeAudio | SharedElementAudio;
 
 export type MenuItemEntry = {
     valid: boolean | null;
