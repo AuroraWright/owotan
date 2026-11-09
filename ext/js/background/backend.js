@@ -411,11 +411,11 @@ export class Backend {
                 void this._openWelcomeGuidePageOnce();
             }
 
-            const {browser, platform: {os}} = this._environment.getInfo();
+            const {browser} = this._environment.getInfo();
             if (browser === 'safari') {
                 void this._prepareSafariBackground();
-            } else if (os !== 'android') {
-                // Android stops the background page more often, and the lookup would use its battery each time
+            } else if (browser !== 'firefox-mobile') {
+                // Firefox for Android stops the background page more often, and the lookup would use the battery each time
                 void this._warmUpLookups();
             }
 

@@ -164,9 +164,9 @@ Along the way it also fixes some performance and layout problems.
 - A mouse button press is recognized from the button that was pressed, not only from the buttons held when the event
   was made. In Safari on macOS those were usually missing a short press, as from a mouse that sends a side button's
   release with its press, so scanning with mouse3 and detecting it in the settings rarely worked.
-- The background page makes a lookup when it starts, except on Android, so the dictionaries are already loaded for
-  the first lookup on a page. In Chromium this made the first lookup after the browser started about 90 ms faster
-  (450 ms to 366 ms). In Safari, whose background page can run at a low priority, loading them had taken 5 s.
+- The background page makes a lookup when it starts, except in Firefox for Android, so the dictionaries are already
+  loaded for the first lookup on a page. In Chromium this made the first lookup after the browser started about 90 ms
+  faster (450 ms to 366 ms). In Safari, whose background page can run at a low priority, loading them had taken 5 s.
 - The progress bar for audio that never loads goes away when other audio is played or the popup shows another lookup.
   Previously it stayed until the popup was reloaded. In Safari this happened when a request for audio never got an
   answer, which Safari allows when the background page stops while answering.
