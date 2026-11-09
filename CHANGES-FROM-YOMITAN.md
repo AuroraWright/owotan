@@ -91,6 +91,11 @@ Along the way it also fixes some performance and layout problems.
   Safari launched or while the Mac was busy. When the background page starts, the extension opens a page of its own
   in a tab that isn't selected and reloads itself. Safari then runs the new background page in that page's process,
   at a normal priority, and the tab closes after about a second. Lookups take about 100 ms.
+- **Keeping the background page loaded.** Safari unloads the background page 30 s after the last message to it,
+  and pages' heartbeats don't always reach it in time, as Safari delays the timers of pages that aren't shown. It was
+  unloaded every few minutes while Safari was in the background, and the next lookup waited for it to load again; on
+  macOS a tab also showed for a moment. The background page now posts to a page's port every minute, which keeps it
+  loaded while a page has Yomitan.
 - **Exports on iOS.** Exported settings and Anki decks go to the share sheet, since Safari on iOS can't download
   files from extension pages.
 - **Layout on small screens.**

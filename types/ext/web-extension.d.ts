@@ -21,10 +21,13 @@ export type Events = {
     unloaded: Record<string, never>;
 };
 
-/** A message that the backend sends to a frame through the frame's port, with the ID the frame responds with, if any. */
+/**
+ * A message that the backend sends to a frame through the frame's port, with the ID the frame responds with, if any.
+ * A `null` message only keeps Safari from unloading the background page, and the frame ignores it.
+ */
 export type PortMessage = {
     id: number | null;
-    message: Application.ApiMessageAny;
+    message: Application.ApiMessageAny | null;
 };
 
 /** A frame's response to a message that the backend sent through the frame's port. */

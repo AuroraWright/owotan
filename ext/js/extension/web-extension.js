@@ -232,6 +232,8 @@ export class WebExtension extends EventDispatcher {
      * @param {import('web-extension').PortMessage} data
      */
     _onMessagePortMessage(port, {id, message}) {
+        // See Backend._keepSafariBackgroundLoaded
+        if (message === null) { return; }
         let responded = false;
         /** @type {import('extension').ChromeRuntimeMessageSendResponseFunction} */
         const sendResponse = (response) => {

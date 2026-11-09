@@ -69,6 +69,12 @@ const ANKI_COLLECTION_COPY_CHECK_INTERVAL = 5 * 60 * 1000;
 const SAFARI_SUSPENDED_HIDDEN_DURATION = 10 * 1000;
 
 /**
+ * How often the backend posts a message to a frame's port on Safari, in milliseconds. Safari keeps the background page
+ * loaded while it has open ports to which it posted in the last 2 minutes.
+ */
+const SAFARI_KEEP_LOADED_INTERVAL = 60 * 1000;
+
+/**
  * How long after the extension reloads on Safari for macOS to run the background page at a higher priority the next
  * background page takes it to have started from that reload, in milliseconds.
  */
@@ -436,6 +442,7 @@ export class Backend {
      * a lookup to load what lookups need.
      */
     async _prepareSafariBackground() {
+        setInterval(this._keepSafariBackgroundLoaded.bind(this), SAFARI_KEEP_LOADED_INTERVAL);
         if (this._environment.getInfo().platform.os === 'mac') {
             try {
                 if (await this._reloadInExtensionPageProcess()) { return; }
@@ -444,6 +451,29 @@ export class Backend {
             }
         }
         await this._warmUpLookups();
+    }
+
+    /**
+     * Safari unloads the background page 30 s after the last message to it, and loads it again for the next one. On
+     * macOS that reloads the extension once more (see _reloadInExtensionPageProcess), with a tab shown for a moment,
+     * and the first lookup after loads the dictionaries again. Frames send heartbeats, but Safari delays or stops the
+     * timers of pages that aren't shown, as while another app is in front, and the background page was unloaded
+     * every few minutes. It stays loaded while it has an open port that it posted to in the last 2 minutes, which
+     * this does through a frame's port for its messages, so that it stays loaded while a page has Yomitan.
+     */
+    _keepSafariBackgroundLoaded() {
+        /** @type {import('web-extension').PortMessage} */
+        const portMessage = {id: null, message: null};
+        for (const framePorts of this._tabMessagePorts.values()) {
+            for (const port of framePorts.values()) {
+                try {
+                    port.postMessage(portMessage);
+                    return;
+                } catch (e) {
+                    // The port disconnected
+                }
+            }
+        }
     }
 
     /**
