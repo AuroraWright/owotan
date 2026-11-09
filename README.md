@@ -1,7 +1,7 @@
-# Yomitan
+# OwOtan
 
 > [!NOTE]
-> This is a fork of Yomitan with Safari support on iOS and macOS and a new dictionary engine. See [CHANGES-FROM-YOMITAN.md](./CHANGES-FROM-YOMITAN.md) for what it changes and adds.
+> OwOtan is a fork of Yomitan with Safari support on iOS and macOS and a new dictionary engine. See [CHANGES-FROM-YOMITAN.md](./CHANGES-FROM-YOMITAN.md) for what it changes and adds.
 
 [![Get Yomitan for Chrome](<https://img.shields.io/chrome-web-store/v/likgccmbimhjbgkjambclfkhldnlhbnn?logo=Google%20Chrome&style=for-the-badge&logoColor=lightblue&color=lightblue&label=get%20yomitan%20for%20chrome%20(stable)>)](https://chrome.google.com/webstore/detail/yomitan/likgccmbimhjbgkjambclfkhldnlhbnn)
 [![Get Yomitan for Firefox](<https://img.shields.io/amo/v/yomitan?logo=Firefox&style=for-the-badge&color=orange&label=get%20yomitan%20for%20firefox%20(stable)>)](https://addons.mozilla.org/en-US/firefox/addon/yomitan/)
@@ -119,7 +119,7 @@ Safari loads extensions from an app, which `npm run build:safari-app` builds wit
 
 - `npm run build:safari-app` builds the app for macOS, signed to run locally. Safari loads it while Develop > Developer Settings > Allow unsigned extensions is on.
 - `npm run build:safari-app -- --platform ios-simulator` builds the app for the iOS Simulator, where unsigned extensions are allowed in Settings > Apps > Safari > Extensions.
-- `npm run build:safari-app -- --platform ios --team {team} --ipa` builds `builds/yomitan-safari-app/ipa/OwOtan.ipa` to install on an iPhone or iPad, replacing `{team}` with the ID of your development team (shown in the Membership details of your Apple Developer account). It installs on the devices that the team has registered. Install it from Xcode's Devices and Simulators window, or with `xcrun devicectl device install app --device {device} builds/yomitan-safari-app/ipa/Yomitan.ipa`.
+- `npm run build:safari-app -- --platform ios --team {team} --ipa` builds `builds/yomitan-safari-app/ipa/OwOtan.ipa` to install on an iPhone or iPad, replacing `{team}` with the ID of your development team (shown in the Membership details of your Apple Developer account). It installs on the devices that the team has registered. Install it from Xcode's Devices and Simulators window, or with `xcrun devicectl device install app --device {device} builds/yomitan-safari-app/ipa/OwOtan.ipa`.
 
 With `--team`, Xcode signs the app for development with a certificate of that team, and creates or downloads the provisioning profiles it needs through the account signed in to Xcode. `--team` also signs a build for macOS, so that Safari loads it without allowing unsigned extensions. With `--ipa`, `--identity` picks the type of certificate that the IPA is signed with: `"Apple Development"` (the default), or `"Apple Distribution"` for an ad hoc build to share with testers.
 

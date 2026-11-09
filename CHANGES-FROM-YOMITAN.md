@@ -1,6 +1,6 @@
 # Changes from upstream Yomitan
 
-This fork (the `safari` branch) is based on Yomitan's `master` at ac1d839f (2026-11-01). It makes three
+This fork (the `safari` branch) is based on Yomitan's `master` at ee81f8dc (2026-11-07). It makes three
 large changes:
 
 - a new dictionary engine;
@@ -41,7 +41,7 @@ Along the way it also fixes some performance and layout problems.
   - Searches are exact-match only; prefix and suffix wildcard searches and their options are gone.
   - Dictionary collection backups (the Dexie database export) are gone.
   - The persistent storage setting is gone; it did nothing in any browser.
-- **Upstream patch.** Yomitan's changes to hoshidicts are in `dev/hoshidicts/hoshidicts.patch`, applied to a pinned
+- **Upstream patch.** OwOtan's changes to hoshidicts are in `dev/hoshidicts/hoshidicts.patch`, applied to a pinned
   upstream commit by `npm run build:hoshidicts`. The patch is proposed upstream as bee-san/hoshidicts#87. The
   record-reading code that is specific to Yomitan is in `dev/hoshidicts/rows.cpp`.
 
@@ -78,7 +78,7 @@ Along the way it also fixes some performance and layout problems.
   the app extension can play in the background, and other audio such as music is lowered while it plays. Audio from
   local network addresses is downloaded by the background page.
 - **Local android.db audio on iOS.** A new audio source plays audio from the `android.db` file that the Local Audio
-  Server for Yomichan add-on generates. The file is copied into the Yomitan app's folder in the Files app.
+  Server for Yomichan add-on generates. The file is copied into the OwOtan app's folder in the Files app.
 - **Returning from suspension.**
   - iOS throttles the extension's background page after Safari is suspended, making lookups take seconds. The
     extension now reloads itself when a page shows again after Safari has been away for 10 s or more.
@@ -95,7 +95,7 @@ Along the way it also fixes some performance and layout problems.
   and pages' heartbeats don't always reach it in time, as Safari delays the timers of pages that aren't shown. It was
   unloaded every few minutes while Safari was in the background, and the next lookup waited for it to load again; on
   macOS a tab also showed for a moment. The background page now posts to a page's port every minute, which keeps it
-  loaded while a page has Yomitan.
+  loaded while a page has OwOtan.
 - **Exports on iOS.** Exported settings and Anki decks go to the share sheet, since Safari on iOS can't download
   files from extension pages.
 - **Layout on small screens.**
@@ -105,15 +105,15 @@ Along the way it also fixes some performance and layout problems.
 - **Platform-specific features.**
   - The clipboard monitor is hidden on iOS and Android.
   - On macOS, the clipboard is read through the app extension.
-  - On macOS, the Yomitan API is served by the Yomitan app.
+  - On macOS, the Yomitan API is served by the OwOtan app.
 
 ## Anki through AnkiMobile
 
 - **New connection setting.** Safari on iOS can't reach AnkiConnect, so notes can be added by opening AnkiMobile's
   `addnote` link, which returns to the page. AnkiConnect remains the default.
-- **Decks and note types.** AnkiMobile passes its decks and note types to the Yomitan app, which gives them to the
+- **Decks and note types.** AnkiMobile passes its decks and note types to the OwOtan app, which gives them to the
   extension.
-- **Duplicate checks.** Yomitan can keep a read-only copy of the collection from the sync server that AnkiMobile uses.
+- **Duplicate checks.** OwOtan can keep a read-only copy of the collection from the sync server that AnkiMobile uses.
   It syncs as Anki does but always aborts, so nothing on the server changes.
   Duplicates are then checked by Anki's rules.
 - **Media.** With a sync server login, images and audio are uploaded through a media sync, the way Anki does it.
@@ -121,6 +121,10 @@ Along the way it also fixes some performance and layout problems.
 
 ## Other additions
 
+- **Name and logo.** The extension and its Safari app are called OwOtan, with a pastel pink and blue logo. Upstream
+  resources keep the Yomitan name: the Yomitan API, the wiki and dictionary links, the license and the copyright
+  lines. The Safari app's bundle identifier is `org.owotan.dev`, so Safari treats it as a different extension from a
+  Yomitan app, with its own settings and dictionaries.
 - **Forvo audio source.**
   - Uses your own API key; every audio source now has an API key field.
   - Lists speakers from countries where the language is spoken first, best-rated first.
