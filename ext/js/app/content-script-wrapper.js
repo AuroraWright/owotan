@@ -17,6 +17,20 @@
  */
 
 (async () => {
+    // Safari runs the content scripts again in the pages that are open when the extension loads, as when it reloads,
+    // and the copies that were already running keep working. Each would show its own popup, one over the other. So a
+    // copy whose extension still works cancels this event, and a copy that finds it canceled does nothing.
+    const contentScriptCheckEvent = 'yomitan-content-script-check';
+    if (!document.dispatchEvent(new Event(contentScriptCheckEvent, {cancelable: true}))) { return; }
+    document.addEventListener(contentScriptCheckEvent, (event) => {
+        try {
+            if (typeof chrome.runtime.id !== 'string') { return; }
+        } catch (e) {
+            return;
+        }
+        event.preventDefault();
+    });
+
     const src = chrome.runtime.getURL('js/app/content-script-main.js');
     // eslint-disable-next-line no-unsanitized/method
     await import(src);

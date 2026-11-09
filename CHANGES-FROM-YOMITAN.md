@@ -60,6 +60,9 @@ Along the way it also fixes some performance and layout problems.
     Safari offer them the ports that popups open to the backend, and close such a port when an extension page
     answered before the backend, so popups kept reconnecting.
 - **Other Safari quirks handled.**
+  - Safari runs the content scripts again in the open pages when the extension loads, as when it reloads, and the
+    copies that were already running keep working. A new copy now stops when a working one is in the page. Before,
+    each copy showed its own popup over the other, so a popup that hides when the cursor leaves it needed two exits.
   - `commands.getAll` from a popup crashes the page, so it is read through the backend.
   - Safari has no usable SharedWorker, so images are drawn through the backend.
   - Missing CSS is worked around:
