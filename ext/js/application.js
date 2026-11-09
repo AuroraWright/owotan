@@ -225,7 +225,12 @@ export class Application extends EventDispatcher {
 
         const {tabId, frameId} = await api.frameInformationGet();
         const crossFrameApi = new CrossFrameAPI(api, tabId, frameId);
-        crossFrameApi.prepare();
+        // Safari only connects the backend's ports to content scripts, so an extension page never gets one (see
+        // CrossFrameAPI.connectFrame). Listening for them there would make Safari offer that page the ports other
+        // extension pages open to the backend, and it closes such a port when a page answers before the backend.
+        if (!(isSafari && inExtensionContext)) {
+            crossFrameApi.prepare();
+        }
         const application = new Application(api, crossFrameApi);
         application.prepare();
         if (waitForDom) { await waitForDomContentLoaded(); }

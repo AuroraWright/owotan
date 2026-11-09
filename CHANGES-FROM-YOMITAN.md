@@ -56,6 +56,9 @@ Along the way it also fixes some performance and layout problems.
   - iOS reorders the keys of objects in messages, which scrambled card format fields. Safari messages are now sent as
     JSON strings.
   - Popup ports are kept when a page is restored from the back/forward cache.
+  - Extension pages no longer listen for ports from the backend, which Safari never connects to them. Listening made
+    Safari offer them the ports that popups open to the backend, and close such a port when an extension page
+    answered before the backend, so popups kept reconnecting.
 - **Other Safari quirks handled.**
   - `commands.getAll` from a popup crashes the page, so it is read through the backend.
   - Safari has no usable SharedWorker, so images are drawn through the backend.
