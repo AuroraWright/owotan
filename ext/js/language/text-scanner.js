@@ -812,6 +812,14 @@ export class TextScanner extends EventDispatcher {
                     e.stopPropagation();
                 }
                 break;
+            case 3: // Back
+            case 4: // Forward
+                // Safari follows a link for a click of any button but the secondary one, such as back and forward
+                if (this._preventBackForwardOnPage || (this._preventBackForwardOnTextHover && this._isMouseOverText)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                break;
         }
     }
 
