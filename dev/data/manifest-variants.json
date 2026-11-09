@@ -142,7 +142,8 @@
                 "background.html",
                 "lib/hoshidicts.js",
                 "lib/hoshidicts.wasm",
-                "css/safari-page.css"
+                "css/safari-page.css",
+                "safari-priority.html"
             ]
         },
         {
@@ -173,7 +174,8 @@
                 "background.html",
                 "lib/hoshidicts.js",
                 "lib/hoshidicts.wasm",
-                "css/safari-page.css"
+                "css/safari-page.css",
+                "safari-priority.html"
             ]
         },
         {
@@ -202,7 +204,8 @@
                 "background.html",
                 "lib/hoshidicts.js",
                 "lib/hoshidicts.wasm",
-                "css/safari-page.css"
+                "css/safari-page.css",
+                "safari-priority.html"
             ]
         },
         {
@@ -311,7 +314,8 @@
                 "js/background/offscreen-main.js",
                 "lib/hoshidicts-threads.js",
                 "lib/hoshidicts-threads.wasm",
-                "css/safari-page.css"
+                "css/safari-page.css",
+                "safari-priority.html"
             ]
         },
         {
@@ -363,7 +367,8 @@
                 "js/background/offscreen-main.js",
                 "lib/hoshidicts-threads.js",
                 "lib/hoshidicts-threads.wasm",
-                "css/safari-page.css"
+                "css/safari-page.css",
+                "safari-priority.html"
             ]
         },
         {
@@ -461,7 +466,8 @@
                 "background.html",
                 "lib/hoshidicts.js",
                 "lib/hoshidicts.wasm",
-                "css/safari-page.css"
+                "css/safari-page.css",
+                "safari-priority.html"
             ]
         }
     ]

@@ -69,6 +69,18 @@ const ANKI_COLLECTION_COPY_CHECK_INTERVAL = 5 * 60 * 1000;
 const SAFARI_SUSPENDED_HIDDEN_DURATION = 10 * 1000;
 
 /**
+ * How long after the extension reloads on Safari for macOS to run the background page at a higher priority the next
+ * background page takes it to have started from that reload, in milliseconds.
+ */
+const SAFARI_PRIORITY_RELOAD_DURATION = 30 * 1000;
+
+/**
+ * How long the tab whose extension page the background page reloads in on Safari for macOS is waited for to load, in
+ * milliseconds. Safari also runs the background page in it if it has not loaded.
+ */
+const SAFARI_PRIORITY_TAB_LOAD_TIMEOUT = 5 * 1000;
+
+/**
  * This class controls the core logic of the extension, including API calls
  * and various forms of communication between browser tabs and external applications.
  */
@@ -399,6 +411,10 @@ export class Backend {
                 void this._openWelcomeGuidePageOnce();
             }
 
+            if (this._environment.getInfo().browser === 'safari') {
+                void this._prepareSafariBackground();
+            }
+
             this._clipboardMonitor.on('change', this._onClipboardTextChange.bind(this));
         } catch (e) {
             log.error(e);
@@ -408,6 +424,108 @@ export class Backend {
                 clearTimeout(this._badgePrepareDelayTimer);
                 this._badgePrepareDelayTimer = null;
             }
+        }
+    }
+
+    /**
+     * On macOS, reloads the extension to run the background page at a higher priority if it has to, and otherwise makes
+     * a lookup to load what lookups need.
+     */
+    async _prepareSafariBackground() {
+        if (this._environment.getInfo().platform.os === 'mac') {
+            try {
+                if (await this._reloadInExtensionPageProcess()) { return; }
+            } catch (e) {
+                log.error(e);
+            }
+        }
+        await this._warmUpLookups();
+    }
+
+    /**
+     * Safari for macOS runs the background page at a low priority. It takes a foreground priority for the page as it
+     * makes it, but for a process that the page's delayed launch replaces right away (a WebKit bug). The page then
+     * only runs on the efficiency cores and its disk reads are throttled, which made lookups take seconds whenever
+     * anything else was busy. A background page that Safari makes while an extension page is open runs in that page's
+     * process instead, and keeps the priority. So a background page that didn't start like that opens an extension
+     * page in a tab that isn't selected and reloads the extension, and the next background page closes the tab.
+     * Pages keep the content scripts through the reload. Safari keeps the background page loaded while pages send
+     * heartbeats, so this is mostly done once when Safari launches.
+     * @returns {Promise<boolean>} Whether the extension reloads.
+     */
+    async _reloadInExtensionPageProcess() {
+        const url = chrome.runtime.getURL('/safari-priority.html');
+        const getTabs = async () => (await this._getAllTabs()).filter((tab) => tab.url === url);
+        const {safariPriorityReloadTime} = await chrome.storage.local.get(['safariPriorityReloadTime']);
+        if (typeof safariPriorityReloadTime === 'number' && Math.abs(Date.now() - safariPriorityReloadTime) < SAFARI_PRIORITY_RELOAD_DURATION) {
+            await chrome.storage.local.remove(['safariPriorityReloadTime']);
+            const tabIds = (await getTabs()).map(({id}) => id).filter((id) => typeof id === 'number');
+            if (tabIds.length > 0) {
+                await chrome.tabs.remove(tabIds);
+            }
+            return false;
+        }
+
+        // Safari can restore a tab of it from when it quit
+        if ((await getTabs()).length === 0) {
+            if ((await this._getAllTabs()).length === 0) {
+                // Opening a tab without a window would open a window
+                await new Promise((resolve) => {
+                    /** @type {(tab: chrome.tabs.Tab) => void} */
+                    const onCreated = () => {
+                        chrome.tabs.onCreated.removeListener(onCreated);
+                        resolve(void 0);
+                    };
+                    chrome.tabs.onCreated.addListener(onCreated);
+                });
+            }
+            const {id} = await chrome.tabs.create({url, active: false});
+            if (typeof id === 'number') {
+                await Promise.race([this._waitForTabLoad(id), promiseTimeout(SAFARI_PRIORITY_TAB_LOAD_TIMEOUT)]);
+            }
+        }
+
+        await chrome.storage.local.set({safariPriorityReloadTime: Date.now()});
+        chrome.runtime.reload();
+        return true;
+    }
+
+    /**
+     * @param {number} tabId
+     * @returns {Promise<void>}
+     */
+    async _waitForTabLoad(tabId) {
+        const {promise, resolve} = /** @type {import('core').DeferredPromiseDetails<void>} */ (deferPromise());
+        /**
+         * @param {number} updatedTabId
+         * @param {chrome.tabs.OnUpdatedInfo} changeInfo
+         */
+        const onUpdated = (updatedTabId, {status}) => {
+            if (updatedTabId === tabId && status === 'complete') { resolve(); }
+        };
+        chrome.tabs.onUpdated.addListener(onUpdated);
+        try {
+            const tab = await this._getTabById(tabId);
+            if (tab.status !== 'complete') {
+                await promise;
+            }
+        } finally {
+            chrome.tabs.onUpdated.removeListener(onUpdated);
+        }
+    }
+
+    /**
+     * Makes a lookup when the backend starts, which loads the dictionaries and the code that lookups run, so that the
+     * first lookup on a page doesn't wait for them. Safari runs the backend at a low priority while no extension page
+     * is shown, and much lower still while it starts, when they took 5 s and made the first lookup take 10 s.
+     */
+    async _warmUpLookups() {
+        try {
+            const options = this._getProfileOptions({current: true}, false);
+            const {general: {resultOutputMode: mode}} = options;
+            await this._translator.findTerms(mode, 'a', this._getTranslatorFindTermsOptions(mode, {}, options));
+        } catch (e) {
+            // A lookup that is made later loads them again.
         }
     }
 
