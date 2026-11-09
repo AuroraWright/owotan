@@ -33,15 +33,21 @@
 //
 // --app-store archives the app for iOS and exports it for App Store Connect, signed with an Apple Distribution
 // certificate, as builds/yomitan-safari-app/ipa/OwOtan.ipa. The App Store does not allow the app extension to play
-// audio, so audio plays in the page, where Safari needs a gesture before it plays. With --upload, exporting uploads it to App Store
-// Connect instead, through the account signed in to Xcode, where it can be tested with TestFlight. App Store
-// Connect needs each upload to have a higher build number, so --app-store needs --version.
+// audio, so audio plays in the page, where Safari needs a gesture before it plays. With --upload, exporting uploads
+// it to App Store Connect instead, through the account signed in to Xcode, where it can be tested with TestFlight.
+// App Store Connect needs each upload to have a higher build number, so --app-store needs --version.
+//
+// --developer-id archives the app for macOS and exports it signed with a Developer ID Application certificate, to
+// share outside the Mac App Store; Safari 18.4 and later load its extension. Apple then notarizes it, with the
+// credentials that `xcrun notarytool store-credentials` saved under the name given with --keychain-profile, and the
+// app is stapled and zipped as builds/yomitan-safari-app/developer-id/OwOtan.zip.
 //
 // --version sets the version of the extension, as `npm run build -- --version` does, and the version and build
 // number of the app. It is up to three numbers separated by periods, such as 20261109.3.
 //
 // node dev/bin/build-safari-app.js [--platform macos|ios-simulator|ios] [--team <id>] [--version <version>]
-//     [--ipa [--identity <type>] | --app-store [--upload]] [--bundle-id <id>] [--project-only]
+//     [--ipa [--identity <type>] | --app-store [--upload] | --developer-id --keychain-profile <name>]
+//     [--bundle-id <id>] [--project-only]
 
 import {execFileSync} from 'child_process';
 import {createHash} from 'crypto';
@@ -49,6 +55,7 @@ import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {parseArgs} from 'util';
+import {parseJson} from '../json.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.join(dirname, '..', '..');
@@ -92,6 +99,8 @@ const {values: args} = parseArgs({
         'ipa': {type: 'boolean', default: false},
         'app-store': {type: 'boolean', default: false},
         'upload': {type: 'boolean', default: false},
+        'developer-id': {type: 'boolean', default: false},
+        'keychain-profile': {type: 'string'},
         'version': {type: 'string'},
         'bundle-id': {type: 'string', default: 'org.owotan.dev'},
         'project-only': {type: 'boolean', default: false},
@@ -130,6 +139,17 @@ if (args['app-store']) {
     if (typeof version !== 'string') {
         throw new Error('App Store Connect needs a higher build number for each upload; pass --version');
     }
+}
+if (args['developer-id']) {
+    if (args.platform !== 'macos' || typeof team !== 'string') {
+        throw new Error('--developer-id is for --platform macos with --team');
+    }
+    if (typeof args['keychain-profile'] !== 'string') {
+        throw new Error('Apple notarizes the app with the credentials that notarytool saved; pass --keychain-profile');
+    }
+}
+if (typeof args['keychain-profile'] === 'string' && !args['developer-id']) {
+    throw new Error('--keychain-profile is for notarizing; pass --developer-id');
 }
 if (args.upload && !args['app-store']) {
     throw new Error('--upload sends a build for App Store Connect; pass --app-store');
@@ -280,14 +300,14 @@ if (typeof team === 'string') {
 const projectPath = path.join(appDirectory, appName, `${appName}.xcodeproj`);
 const derivedDataPath = path.join(appDirectory, 'DerivedData');
 const buildArgs = ['-project', projectPath, '-scheme', platform.scheme, '-configuration', 'Release', '-destination', platform.destination, '-derivedDataPath', derivedDataPath, ...signing];
-if (!args.ipa && !args['app-store']) {
+if (!args.ipa && !args['app-store'] && !args['developer-id']) {
     run('xcodebuild', [...buildArgs, 'build']);
     console.log(`Built ${path.join(derivedDataPath, 'Build', 'Products', platform.products, `${appName}.app`)}`);
     process.exit(0);
 }
 
 const archivePath = path.join(appDirectory, `${appName}.xcarchive`);
-const exportPath = path.join(appDirectory, 'ipa');
+const exportPath = path.join(appDirectory, args['developer-id'] ? 'developer-id' : 'ipa');
 const exportOptionsPath = path.join(appDirectory, 'ExportOptions.plist');
 run('xcodebuild', [...buildArgs, '-archivePath', archivePath, 'archive']);
 // For App Store Connect, exporting would otherwise give the build a number of its own instead of --version
@@ -303,7 +323,7 @@ fs.writeFileSync(exportOptionsPath, `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
     <key>method</key>
-    <string>${args['app-store'] ? 'app-store-connect' : ipaExportMethod}</string>
+    <string>${args['app-store'] ? 'app-store-connect' : (args['developer-id'] ? 'developer-id' : ipaExportMethod)}</string>
     <key>signingStyle</key>
     <string>automatic</string>
     <key>teamID</key>
@@ -316,7 +336,23 @@ fs.rmSync(exportPath, {recursive: true, force: true});
 // of the copy, and fails if that is another version of rsync, such as Homebrew's
 const exportEnv = {...process.env, PATH: `/usr/bin:${process.env.PATH ?? ''}`};
 run('xcodebuild', ['-exportArchive', '-archivePath', archivePath, '-exportPath', exportPath, '-exportOptionsPlist', exportOptionsPath, '-allowProvisioningUpdates'], exportEnv);
-if (args.upload) {
+if (args['developer-id']) {
+    const appPath = path.join(exportPath, `${appName}.app`);
+    const zipPath = path.join(exportPath, `${appName}.zip`);
+    // Apple notarizes a zip of the app, and the ticket is then stapled to the app itself, so that Gatekeeper accepts
+    // it without asking Apple. The zip that is shared holds the stapled app.
+    run('ditto', ['-c', '-k', '--keepParent', appPath, zipPath]);
+    const keychainProfile = /** @type {string} */ (args['keychain-profile']);
+    const submission = /** @type {{id: string, status: string}} */ (parseJson(execFileSync('xcrun', ['notarytool', 'submit', zipPath, '--keychain-profile', keychainProfile, '--wait', '--output-format', 'json'], {cwd: rootDirectory, encoding: 'utf8'})));
+    if (submission.status !== 'Accepted') {
+        run('xcrun', ['notarytool', 'log', submission.id, '--keychain-profile', keychainProfile]);
+        throw new Error(`Apple did not notarize the app: ${submission.status}`);
+    }
+    run('xcrun', ['stapler', 'staple', appPath]);
+    fs.rmSync(zipPath);
+    run('ditto', ['-c', '-k', '--keepParent', appPath, zipPath]);
+    console.log(`Built ${zipPath}`);
+} else if (args.upload) {
     console.log(`Uploaded ${appName} ${version} to App Store Connect`);
 } else {
     console.log(`Built ${path.join(exportPath, `${appName}.ipa`)}`);
