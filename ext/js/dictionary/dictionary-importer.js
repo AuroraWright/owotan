@@ -298,7 +298,7 @@ export class DictionaryImporter {
             if (details.yomitanVersion === '0.0.0.0') {
                 // Running a development version of Yomitan
             } else if (compareRevisions(details.yomitanVersion, minimumYomitanVersion)) {
-                throw new Error(`Dictionary is incompatible with this version of Yomitan (${details.yomitanVersion}; minimum required: ${minimumYomitanVersion})`);
+                throw new Error(`Dictionary is incompatible with this version of OwOtan (${details.yomitanVersion}; minimum required: ${minimumYomitanVersion})`);
             }
             summary.minimumYomitanVersion = minimumYomitanVersion;
         }

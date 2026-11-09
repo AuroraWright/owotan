@@ -141,7 +141,7 @@ export class CrossFrameAPIPort extends EventDispatcher {
      */
     _onResume(e) {
         // Page Resumed after being frozen
-        log.log('Yomitan cross frame reset. Resuming after page frozen.', e);
+        log.log('OwOtan cross frame reset. Resuming after page frozen.', e);
         this._onDisconnect();
     }
 
@@ -151,7 +151,7 @@ export class CrossFrameAPIPort extends EventDispatcher {
     _onPageShow(e) {
         // Page restored from BFCache
         if (e.persisted) {
-            log.log('Yomitan cross frame reset. Page restored from BFCache.', e);
+            log.log('OwOtan cross frame reset. Page restored from BFCache.', e);
             this._onDisconnect();
         }
     }
