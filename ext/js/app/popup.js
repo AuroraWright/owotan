@@ -578,9 +578,10 @@ export class Popup extends EventDispatcher {
                 throw new PopupError('Popup not supported in this context', this);
             }
             const url = chrome.runtime.getURL('/popup.html');
-            if (isSafariExtension()) {
-                // Safari 18 refuses to navigate a frame that is already in the document to an extension page, from
-                // its URL or its location, so the frame is taken out of the document while its URL is set.
+            if (this._isSafariBefore18Point6()) {
+                // Safari before 18.6 refuses to navigate a frame that is already in the document to an extension
+                // page, from its URL or its location, as the frame is at about:blank (WebKit bug 291696). So the
+                // frame is taken out of the document while its URL is set.
                 const {parentNode, nextSibling} = frame;
                 frame.remove();
                 frame.setAttribute('src', url);
@@ -617,6 +618,19 @@ export class Popup extends EventDispatcher {
             optionsContext: this._optionsContext,
         };
         await this._invokeSafe('displayConfigure', configureParams);
+    }
+
+    /**
+     * Gets whether the extension runs in a version of Safari before 18.6, from the version in the user agent.
+     * @returns {boolean}
+     */
+    _isSafariBefore18Point6() {
+        if (!isSafariExtension()) { return false; }
+        const match = /\bVersion\/(\d+)\.(\d+)/.exec(navigator.userAgent);
+        if (match === null) { return false; }
+        const major = Number.parseInt(match[1], 10);
+        const minor = Number.parseInt(match[2], 10);
+        return major < 18 || (major === 18 && minor < 6);
     }
 
     /**
