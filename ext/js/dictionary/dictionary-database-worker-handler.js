@@ -18,6 +18,7 @@
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {log} from '../core/log.js';
+import {trimBlockCache} from '../data/blob-file-store.js';
 import {DictionaryDatabaseEngine} from './dictionary-database-engine.js';
 import {createDictionaryStorage} from './dictionary-storage.js';
 
@@ -81,6 +82,8 @@ export class DictionaryDatabaseWorkerHandler {
         } catch (e) {
             response = {id, error: ExtensionError.serialize(e)};
         }
+        // What the request read ahead past the size of the cache of Blob reads (Safari)
+        trimBlockCache();
         self.postMessage(response);
     }
 

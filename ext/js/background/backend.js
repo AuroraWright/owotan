@@ -94,6 +94,42 @@ const SAFARI_PRIORITY_RELOAD_DURATION = 30 * 1000;
 const SAFARI_PRIORITY_TAB_LOAD_TIMEOUT = 5 * 1000;
 
 /**
+ * How much of the stored dictionary files the background page caches on Safari for macOS, in bytes. Safari reads
+ * them from Blobs, and each read costs over a millisecond however little it reads. With many dictionaries, the
+ * blocks that lookups read add up to much more than the default cache, which suits phones, and lookups made one
+ * after another, as the Yomitan API's tokenize makes, kept reading the same blocks again.
+ */
+const SAFARI_MAC_BLOCK_CACHE_SIZE = 512 * 1024 * 1024;
+
+/**
+ * The size of the blocks the background page reads the stored dictionary files in on Safari for macOS, in bytes.
+ * Lookups read ahead the records they will read, a few hundred bytes each, apart from each other, and each block read
+ * for one takes its whole size in the cache: with larger ones, a few sentences' lookups pushed blocks they read
+ * again out of it. hoshidicts reads 4 KB pages and a few bytes past them, which this size holds most of.
+ */
+const SAFARI_MAC_BLOCK_SIZE = 8 * 1024;
+
+/**
+ * How much the background page reads ahead at once on Safari for macOS, in bytes, which one request can take the cache
+ * past its size by until it ends.
+ */
+const SAFARI_MAC_READ_AHEAD_SIZE = 64 * 1024 * 1024;
+
+/**
+ * How the background page reads the stored dictionary files on Safari for iOS and iPadOS (`setBlockCache`), within
+ * the memory of the oldest iPhones that iOS 18 supports, which have 3 GB. The cache is the default's size, but the
+ * blocks are smaller, so it holds more of the records lookups read, and a lookup reads ahead the records it will read
+ * past the size of the cache until it ends: a lookup of frequencies in many dictionaries reads ahead thousands of
+ * them. Blocks read ahead near each other are read together, so smaller ones cost no more reads.
+ */
+const SAFARI_IOS_BLOB_READ_OPTIONS = {
+    blockCacheSize: 16 * 1024 * 1024,
+    blockSize: 16 * 1024,
+    readAheadSize: 32 * 1024 * 1024,
+    hashTablesInMemory: false,
+};
+
+/**
  * This class controls the core logic of the extension, including API calls
  * and various forms of communication between browser tabs and external applications.
  */
@@ -407,6 +443,18 @@ export class Backend {
                 sharedWorkerBridge.port.addEventListener('messageerror', this._onPmMessageError.bind(this));
                 sharedWorkerBridge.port.start();
             }
+            const {browser, platform: {os}} = this._environment.getInfo();
+            if (this._dictionaryDatabase instanceof DictionaryDatabase && browser === 'safari') {
+                // A Mac has the memory for what phones do not (setHashTablesInMemory)
+                this._dictionaryDatabase.blobReadOptions = os === 'mac' ?
+                    {
+                        blockCacheSize: SAFARI_MAC_BLOCK_CACHE_SIZE,
+                        blockSize: SAFARI_MAC_BLOCK_SIZE,
+                        readAheadSize: SAFARI_MAC_READ_AHEAD_SIZE,
+                        hashTablesInMemory: true,
+                    } :
+                    SAFARI_IOS_BLOB_READ_OPTIONS;
+            }
             try {
                 await this._dictionaryDatabase.prepare();
             } catch (e) {
@@ -425,7 +473,6 @@ export class Backend {
 
             void this._openWelcomeGuidePageOnFirstStart();
 
-            const {browser} = this._environment.getInfo();
             if (browser === 'safari') {
                 void this._prepareSafariBackground();
             } else if (browser !== 'firefox-mobile') {

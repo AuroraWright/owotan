@@ -16,7 +16,10 @@
  */
 
 import {afterAll, beforeAll, describe, expect, test, vi} from 'vitest';
-import {BlobReadHandle} from '../ext/js/data/blob-file-store.js';
+import {BlobReadHandle, setBlockCache, trimBlockCache} from '../ext/js/data/blob-file-store.js';
+
+/** The defaults of `setBlockCache`. */
+const DEFAULT_BLOCK_CACHE = {size: 256 * 64 * 1024, blockSize: 64 * 1024, readAheadSize: 128 * 64 * 1024};
 
 /**
  * A Blob whose content `FileReaderSync` reads synchronously, as Node has no `FileReaderSync`.
@@ -42,6 +45,24 @@ class TestBlob {
      */
     slice(start, end) {
         return new TestBlob(this.content.slice(start, end));
+    }
+}
+
+/**
+ * Joins TestBlobs, as `readBlobs` joins Blobs to read them together.
+ */
+class TestJoinedBlob extends TestBlob {
+    /**
+     * @param {TestBlob[]} parts
+     */
+    constructor(parts) {
+        const content = new Uint8Array(parts.reduce((size, part) => size + part.size, 0));
+        let position = 0;
+        for (const part of parts) {
+            content.set(part.content, position);
+            position += part.size;
+        }
+        super(content);
     }
 }
 
@@ -83,6 +104,7 @@ function createHandle(content) {
 describe('BlobReadHandle', () => {
     beforeAll(() => {
         vi.stubGlobal('FileReaderSync', TestFileReaderSync);
+        vi.stubGlobal('Blob', TestJoinedBlob);
     });
 
     afterAll(() => {
@@ -128,5 +150,78 @@ describe('BlobReadHandle', () => {
             handle.read(new Uint8Array(16), {at});
         }
         expect(readCount).toStrictEqual(1);
+    });
+
+    test('Keeps as many blocks as the cache size set holds', () => {
+        const blockSize = 64 * 1024;
+        const blockCount = 300;
+        const handle = createHandle(createContent(blockCount * blockSize, 6));
+        const readBlocks = () => {
+            readCount = 0;
+            for (let i = 0; i < blockCount; ++i) {
+                handle.read(new Uint8Array(16), {at: i * blockSize});
+            }
+            // As after each request
+            trimBlockCache();
+            return readCount;
+        };
+        try {
+            setBlockCache({...DEFAULT_BLOCK_CACHE, size: blockCount * blockSize});
+            readBlocks();
+            expect(readBlocks()).toStrictEqual(0);
+            // The least recently used block was dropped
+            setBlockCache({...DEFAULT_BLOCK_CACHE, size: (blockCount - 1) * blockSize});
+            readBlocks();
+            expect(readBlocks()).toStrictEqual(1);
+        } finally {
+            setBlockCache(DEFAULT_BLOCK_CACHE);
+        }
+    });
+
+    test('Reads blocks of the size set', () => {
+        const blockSize = 8 * 1024;
+        const content = createContent(100 * blockSize, 7);
+        const handle = createHandle(content);
+        try {
+            setBlockCache({...DEFAULT_BLOCK_CACHE, blockSize});
+            readCount = 0;
+            for (let at = 0; at + 200 <= 10 * blockSize; at += 100) {
+                const buffer = new Uint8Array(200);
+                expect(handle.read(buffer, {at})).toStrictEqual(200);
+                expect(Buffer.compare(buffer, content.subarray(at, at + 200))).toStrictEqual(0);
+            }
+            expect(readCount).toStrictEqual(10);
+        } finally {
+            setBlockCache(DEFAULT_BLOCK_CACHE);
+        }
+    });
+
+    test('Reads ahead more than the cache holds, which it keeps until it is trimmed', () => {
+        const blockSize = 8 * 1024;
+        const blockCount = 100;
+        const content = createContent(blockCount * blockSize, 8);
+        const handle = createHandle(content);
+        try {
+            setBlockCache({size: 10 * blockSize, blockSize, readAheadSize: blockCount * blockSize});
+            for (let i = 0; i < blockCount; ++i) {
+                handle.advise(i * blockSize, 16);
+            }
+            readCount = 0;
+            for (let i = 0; i < blockCount; ++i) {
+                const buffer = new Uint8Array(16);
+                handle.read(buffer, {at: i * blockSize});
+                expect(Buffer.compare(buffer, content.subarray(i * blockSize, i * blockSize + 16))).toStrictEqual(0);
+            }
+            expect(readCount).toStrictEqual(1);
+            trimBlockCache();
+            readCount = 0;
+            for (let i = 0; i < blockCount; ++i) {
+                handle.read(new Uint8Array(16), {at: i * blockSize});
+            }
+            // Only the 10 most recently read stayed
+            expect(readCount).toStrictEqual(blockCount - 10);
+        } finally {
+            setBlockCache(DEFAULT_BLOCK_CACHE);
+        }
     });
 });

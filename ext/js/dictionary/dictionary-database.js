@@ -42,6 +42,13 @@ export class DictionaryDatabase {
         this._nextRequestId = 0;
         /** @type {Map<number, {resolve: (value: unknown) => void, reject: (reason: Error) => void}>} */
         this._requests = new Map();
+        /**
+         * How the worker reads dictionaries stored as Blobs (Safari), if not as on phones: how much of them it caches,
+         * in blocks of what size, and how much it reads ahead at once, in bytes (`setBlockCache`), and whether it keeps
+         * their hash tables in memory. Set before `prepare`.
+         * @type {?{blockCacheSize: number, blockSize: number, readAheadSize: number, hashTablesInMemory: boolean}}
+         */
+        this.blobReadOptions = null;
     }
 
     /** */
@@ -53,7 +60,17 @@ export class DictionaryDatabase {
             await this._engine.prepare();
         } else {
             if (this._worker === null) {
-                const worker = new Worker('/js/dictionary/dictionary-database-worker-main.js', {type: 'module'});
+                let query = '';
+                if (this.blobReadOptions !== null) {
+                    const {blockCacheSize, blockSize, readAheadSize, hashTablesInMemory} = this.blobReadOptions;
+                    query = `?${new URLSearchParams({
+                        blockCacheSize: `${blockCacheSize}`,
+                        blockSize: `${blockSize}`,
+                        readAheadSize: `${readAheadSize}`,
+                        hashTablesInMemory: `${hashTablesInMemory}`,
+                    })}`;
+                }
+                const worker = new Worker(`/js/dictionary/dictionary-database-worker-main.js${query}`, {type: 'module'});
                 worker.addEventListener('message', this._onWorkerMessage.bind(this));
                 worker.addEventListener('error', (event) => {
                     log.log('Worker terminated with error:', event);

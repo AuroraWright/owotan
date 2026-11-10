@@ -36,6 +36,23 @@ const IMPORT_FILE_NAMES = ['blobs.bin', 'hash.table', 'bloom.filter', 'scan.idx'
 const ON_DEMAND_FILE_NAMES = new Set(['blobs.bin', 'media.bin', 'hash.table']);
 
 /**
+ * Whether `BlobDictionaryStorage` reads the hash tables whole when it mounts dictionaries, and keeps them while
+ * they are mounted (`setHashTablesInMemory`).
+ */
+let hashTablesInMemory = false;
+
+/**
+ * Sets whether the hash tables of the dictionaries mounted from Blobs (Safari) are read whole as they are mounted
+ * and kept in memory. Each lookup reads a slot of the hash table of each dictionary that may have each form of the
+ * text, at places no cache can guess, so most of the reads of a lookup are of them otherwise. All of them together
+ * take a few hundred megabytes for many dictionaries, too much for phones.
+ * @param {boolean} value
+ */
+export function setHashTablesInMemory(value) {
+    hashTablesInMemory = value;
+}
+
+/**
  * Stores each imported dictionary as a directory of hoshidicts files in the origin private file system.
  * Mounted dictionaries are read through sync access handles, which lock their files, so they can only be
  * mounted in a dedicated worker, and only the context that mounted a dictionary can delete it.
@@ -217,20 +234,35 @@ export class BlobDictionaryStorage {
     /**
      * Reads the files hoshidicts reads whole when it adds a dictionary ahead, those of all the dictionaries in one
      * read (`readBlobs`), which takes a small part of the time of the hundreds of reads they would otherwise need.
+     * The hash tables are also read whole if they are to be kept in memory (`setHashTablesInMemory`), on their own,
+     * as the Blobs read together share a buffer.
      * @type {import('dictionary-database').DictionaryStorage['mount']}
      */
     async mount(hoshidicts, dictionaries) {
         const entries = await this._store.getMany(dictionaries.map(({id}) => id));
-        const blobs = entries.flatMap((entry) => (entry?.files ?? []).filter(({name}) => !ON_DEMAND_FILE_NAMES.has(name)).map(({blob}) => blob));
+        const allFiles = entries.flatMap((entry) => entry?.files ?? []);
         /** @type {Map<Blob, Uint8Array>} */
         const contents = new Map();
-        try {
-            const results = readBlobs(blobs);
-            for (let i = 0; i < blobs.length; ++i) { contents.set(blobs[i], results[i]); }
-        } catch (e) {
-            // They are read as they are needed.
+        /** @type {Set<Blob>} */
+        const keptBlobs = new Set();
+        const readWhole = (/** @type {Blob[]} */ blobs) => {
+            try {
+                const results = readBlobs(blobs);
+                for (let i = 0; i < blobs.length; ++i) { contents.set(blobs[i], results[i]); }
+                return true;
+            } catch (e) {
+                // They are read as they are needed.
+                return false;
+            }
+        };
+        readWhole(allFiles.filter(({name}) => !ON_DEMAND_FILE_NAMES.has(name)).map(({blob}) => blob));
+        if (hashTablesInMemory) {
+            const hashTables = allFiles.filter(({name}) => name === 'hash.table').map(({blob}) => blob);
+            if (readWhole(hashTables)) {
+                for (const blob of hashTables) { keptBlobs.add(blob); }
+            }
         }
-        const fileLists = entries.map((entry) => entry?.files.map(({name, blob}) => ({name, handle: new BlobReadHandle(blob, contents.get(blob) ?? null)})) ?? null);
+        const fileLists = entries.map((entry) => entry?.files.map(({name, blob}) => ({name, blob, handle: new BlobReadHandle(blob, contents.get(blob) ?? null)})) ?? null);
         for (const files of fileLists) {
             // hoshidicts reads the header of each hash table as it adds the dictionary, so they are read together.
             files?.find(({name}) => name === 'hash.table')?.handle.advise(0, 4);
@@ -243,8 +275,10 @@ export class BlobDictionaryStorage {
             }),
             release: () => {
                 contents.clear();
-                for (const files of fileLists) {
-                    for (const {handle} of files ?? []) { handle.release(); }
+                for (const fileList of fileLists) {
+                    for (const {blob, handle} of fileList ?? []) {
+                        if (!keptBlobs.has(blob)) { handle.release(); }
+                    }
                 }
             },
         };

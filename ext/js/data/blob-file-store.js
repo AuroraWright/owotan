@@ -126,18 +126,26 @@ export class BlobFileStore {
 }
 
 /**
- * Reads smaller than this are served from blocks of this size, which are read whole and cached.
+ * Reads smaller than this are served from blocks, which are read whole and cached; larger ones are read directly.
  */
-const BLOCK_SIZE = 64 * 1024;
+const DIRECT_READ_SIZE = 64 * 1024;
 /**
- * How many blocks are cached, across all handles.
+ * The size of the blocks by default.
  */
-const MAX_CACHED_BLOCKS = 256;
+const DEFAULT_BLOCK_SIZE = 64 * 1024;
 /**
- * The most blocks read ahead at once, for the ranges handles are told of (`BlobReadHandle.advise`), which is less
- * than the cache holds so that they do not push each other out of it.
+ * How much is cached by default, across all handles, in bytes.
  */
-const MAX_ADVISED_BLOCKS = MAX_CACHED_BLOCKS / 2;
+const DEFAULT_CACHE_SIZE = 256 * DEFAULT_BLOCK_SIZE;
+/**
+ * The most read ahead at once by default, in bytes.
+ */
+const DEFAULT_READ_AHEAD_SIZE = 128 * DEFAULT_BLOCK_SIZE;
+/**
+ * The most bytes between two blocks read ahead that are read with them, so that they are read as one slice of their
+ * Blob: each slice costs Safari about as much as reading this many bytes.
+ */
+const MAX_READ_AHEAD_GAP = 32 * 1024;
 /**
  * The most that one `FileReaderSync` read reads, so a large read does not make a copy of its size.
  */
@@ -190,7 +198,7 @@ export class BlobReadHandle {
             return end - at;
         }
         let position = at;
-        if (end - at >= BLOCK_SIZE) {
+        if (end - at >= DIRECT_READ_SIZE) {
             // In parts, as each read makes a copy, and hoshidicts reads a whole archive at once.
             while (position < end) {
                 const content = new Uint8Array(this._getReader().readAsArrayBuffer(this._blob.slice(position, Math.min(position + MAX_READ_SIZE, end))));
@@ -201,7 +209,7 @@ export class BlobReadHandle {
             return position - at;
         }
         while (position < end) {
-            const blockStart = position - (position % BLOCK_SIZE);
+            const blockStart = position - (position % blockSize);
             const block = this._getBlock(blockStart);
             const count = Math.min(end, blockStart + block.byteLength) - position;
             buffer.set(block.subarray(position - blockStart, position - blockStart + count), position - at);
@@ -219,9 +227,9 @@ export class BlobReadHandle {
     advise(offset, length) {
         if (this._content !== null) { return; }
         const end = Math.min(offset + length, this._blob.size);
-        for (let start = offset - (offset % BLOCK_SIZE); start < end && advisedBlocks.size < MAX_ADVISED_BLOCKS; start += BLOCK_SIZE) {
+        for (let start = offset - (offset % blockSize); start < end && advisedBlocks.size < maxReadAheadBlocks; start += blockSize) {
             const key = `${this._id}:${start}`;
-            if (!cachedBlocks.has(key)) { advisedBlocks.set(key, this._getBlockBlob(start)); }
+            if (!cachedBlocks.has(key)) { advisedBlocks.set(key, {id: this._id, blob: this._blob, start}); }
         }
     }
 
@@ -256,7 +264,7 @@ export class BlobReadHandle {
             return block;
         }
         if (advisedBlocks.size > 0) {
-            advisedBlocks.set(key, this._getBlockBlob(start));
+            advisedBlocks.set(key, {id: this._id, blob: this._blob, start});
             try {
                 readAdvisedBlocks();
             } catch (e) {
@@ -275,21 +283,36 @@ export class BlobReadHandle {
      * @returns {Blob}
      */
     _getBlockBlob(start) {
-        return this._blob.slice(start, Math.min(start + BLOCK_SIZE, this._blob.size));
+        return this._blob.slice(start, Math.min(start + blockSize, this._blob.size));
     }
 }
 
 /**
- * Reads the blocks of the ranges handles were told of in one read (`BlobReadHandle.advise`), and caches them.
+ * Reads the blocks of the ranges handles were told of in one read (`BlobReadHandle.advise`), and caches them. The
+ * blocks of a handle near each other are read as one slice of its Blob, with what lies between them
+ * (`MAX_READ_AHEAD_GAP`).
  */
 function readAdvisedBlocks() {
-    const keys = [...advisedBlocks.keys()];
-    const blobs = [...advisedBlocks.values()];
+    const advised = [...advisedBlocks.values()].sort((a, b) => (a.id - b.id) || (a.start - b.start));
     advisedBlocks.clear();
-    const contents = readBlobs(blobs);
-    for (let i = 0; i < keys.length; ++i) {
-        // A copy, so that the buffer of all of them is not kept while one is cached
-        cacheBlock(keys[i], new Uint8Array(contents[i]));
+    /** @type {{id: number, blob: Blob, start: number, end: number}[]} */
+    const runs = [];
+    for (const {id, blob, start} of advised) {
+        const run = runs.at(-1);
+        if (typeof run !== 'undefined' && run.id === id && start - run.end <= MAX_READ_AHEAD_GAP) {
+            run.end = start + blockSize;
+        } else {
+            runs.push({id, blob, start, end: start + blockSize});
+        }
+    }
+    const contents = readBlobs(runs.map(({blob, start, end}) => blob.slice(start, Math.min(end, blob.size))));
+    for (let i = 0; i < runs.length; ++i) {
+        const {id, start} = runs[i];
+        const content = contents[i];
+        for (let position = 0; position < content.byteLength; position += blockSize) {
+            // A copy, so that the buffer of all of them is not kept while one is cached
+            cacheBlock(`${id}:${start + position}`, content.slice(position, position + blockSize));
+        }
     }
 }
 
@@ -298,7 +321,9 @@ function readAdvisedBlocks() {
  * @param {Uint8Array} block
  */
 function cacheBlock(key, block) {
-    if (cachedBlocks.size >= MAX_CACHED_BLOCKS) {
+    // Past its size by up to what is read ahead at once, so that what a request reads ahead stays until it is read,
+    // until the request ends (trimBlockCache)
+    if (cachedBlocks.size >= maxCachedBlocks + maxReadAheadBlocks) {
         cachedBlocks.delete(/** @type {string} */ (cachedBlocks.keys().next().value));
     }
     cachedBlocks.set(key, block);
@@ -339,6 +364,53 @@ export function readBlobs(blobs) {
     return results;
 }
 
+/**
+ * Sets how `BlobReadHandle` reads and caches in this context, across all handles. The defaults suit the memory of
+ * phones.
+ * @param {{size: number, blockSize: number, readAheadSize: number}} options How much is cached between requests, in
+ *   blocks of what size, and how much is read ahead at once, all in bytes. The cache holds at least one block, and
+ *   holds more by up to what is read ahead at once until `trimBlockCache`. Smaller blocks read less that is not
+ *   needed, so more of what is fits: the ranges read ahead are often records of a few hundred bytes, apart from each
+ *   other. Blocks are at most `DIRECT_READ_SIZE`.
+ */
+export function setBlockCache({size, blockSize: newBlockSize, readAheadSize}) {
+    if (newBlockSize !== blockSize) {
+        // The blocks cached are of the old size
+        cachedBlocks.clear();
+        advisedBlocks.clear();
+        blockSize = Math.min(newBlockSize, DIRECT_READ_SIZE);
+    }
+    maxCachedBlocks = Math.max(Math.floor(size / blockSize), 1);
+    maxReadAheadBlocks = Math.max(Math.floor(readAheadSize / blockSize), 1);
+    trimBlockCache();
+}
+
+/**
+ * Drops the least recently used blocks past the size of the cache, which what one request read ahead can take it
+ * past. Called after each request.
+ */
+export function trimBlockCache() {
+    while (cachedBlocks.size > maxCachedBlocks) {
+        cachedBlocks.delete(/** @type {string} */ (cachedBlocks.keys().next().value));
+    }
+}
+
+/**
+ * How many blocks are cached between requests, across all handles (`setBlockCache`).
+ * @type {number}
+ */
+let maxCachedBlocks = DEFAULT_CACHE_SIZE / DEFAULT_BLOCK_SIZE;
+/**
+ * The most blocks read ahead at once, for the ranges handles are told of (`BlobReadHandle.advise`). A lookup in many
+ * dictionaries tells of many, and those past this are read one at a time.
+ * @type {number}
+ */
+let maxReadAheadBlocks = DEFAULT_READ_AHEAD_SIZE / DEFAULT_BLOCK_SIZE;
+/**
+ * The size of the blocks read and cached (`setBlockCache`).
+ * @type {number}
+ */
+let blockSize = DEFAULT_BLOCK_SIZE;
 /** @type {number} */
 let nextHandleId = 0;
 /**
@@ -347,7 +419,8 @@ let nextHandleId = 0;
  */
 const cachedBlocks = new Map();
 /**
- * The blocks of the ranges handles were told of that are not cached, by handle and position.
- * @type {Map<string, Blob>}
+ * The blocks of the ranges handles were told of that are not cached, by handle and position, with the id and Blob of
+ * their handle.
+ * @type {Map<string, {id: number, blob: Blob, start: number}>}
  */
 const advisedBlocks = new Map();

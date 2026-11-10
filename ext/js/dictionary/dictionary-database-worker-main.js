@@ -16,11 +16,20 @@
  */
 
 import {log} from '../core/log.js';
+import {setBlockCache} from '../data/blob-file-store.js';
 import {DictionaryDatabaseWorkerHandler} from './dictionary-database-worker-handler.js';
+import {setHashTablesInMemory} from './dictionary-storage.js';
 
 /** Entry point. */
 function main() {
     try {
+        // Given by the page that starts the worker (DictionaryDatabase.blobReadOptions)
+        const searchParams = new URLSearchParams(self.location.search);
+        const [size, blockSize, readAheadSize] = ['blockCacheSize', 'blockSize', 'readAheadSize'].map((name) => Number.parseInt(searchParams.get(name) ?? '', 10));
+        if (Number.isFinite(size) && Number.isFinite(blockSize) && Number.isFinite(readAheadSize)) {
+            setBlockCache({size, blockSize, readAheadSize});
+        }
+        setHashTablesInMemory(searchParams.get('hashTablesInMemory') === 'true');
         const dictionaryDatabaseWorkerHandler = new DictionaryDatabaseWorkerHandler();
         void dictionaryDatabaseWorkerHandler.prepare();
     } catch (e) {
