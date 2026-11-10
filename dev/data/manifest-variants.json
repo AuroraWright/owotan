@@ -445,6 +445,22 @@
                     "value": [
                         "css/safari-page.css"
                     ]
+                },
+                {
+                    "action": "add",
+                    "path": [
+                        "web_accessible_resources",
+                        0,
+                        "resources"
+                    ],
+                    "items": [
+                        "templates-display.html",
+                        "css/*",
+                        "images/*",
+                        "fonts/*",
+                        "data/*",
+                        "lib/*"
+                    ]
                 }
             ],
             "excludeFiles": [
