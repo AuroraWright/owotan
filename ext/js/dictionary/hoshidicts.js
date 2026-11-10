@@ -120,10 +120,11 @@ export class Hoshidicts {
     /**
      * Finds the term rows whose expression or reading is each key. Glossaries are not included.
      * @param {string[]} keys
+     * @param {string[]} dictionaries The names of the dictionaries to look in. The others are not read.
      * @returns {import('hoshidicts').TermRow[][]}
      */
-    findTerms(keys) {
-        return this._request(this._findTerms, keys);
+    findTerms(keys, dictionaries) {
+        return this._request(this._findTerms, {keys, dictionaries});
     }
 
     /**
@@ -144,26 +145,29 @@ export class Hoshidicts {
 
     /**
      * @param {string[]} keys
+     * @param {string[]} dictionaries The names of the dictionaries to look in. The others are not read.
      * @returns {import('hoshidicts').MetaRow[][]}
      */
-    findTermMeta(keys) {
-        return this._request(this._findTermMeta, keys);
+    findTermMeta(keys, dictionaries) {
+        return this._request(this._findTermMeta, {keys, dictionaries});
     }
 
     /**
      * @param {string[]} keys
+     * @param {string[]} dictionaries The names of the dictionaries to look in. The others are not read.
      * @returns {import('hoshidicts').KanjiRow[][]}
      */
-    findKanji(keys) {
-        return this._request(this._findKanji, keys);
+    findKanji(keys, dictionaries) {
+        return this._request(this._findKanji, {keys, dictionaries});
     }
 
     /**
      * @param {string[]} keys
+     * @param {string[]} dictionaries The names of the dictionaries to look in. The others are not read.
      * @returns {import('hoshidicts').MetaRow[][]}
      */
-    findKanjiMeta(keys) {
-        return this._request(this._findKanjiMeta, keys);
+    findKanjiMeta(keys, dictionaries) {
+        return this._request(this._findKanjiMeta, {keys, dictionaries});
     }
 
     /**

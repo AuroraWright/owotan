@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstring>
 #include <exception>
 #include <filesystem>
@@ -67,6 +68,18 @@ struct ImportReport {
 
 struct Error {
   std::string error;
+};
+
+// Keys to look up in some of the loaded dictionaries.
+template <typename Key>
+struct Lookup {
+  std::vector<Key> keys;
+  // The names of the dictionaries to look in. Each dictionary is loaded as
+  // every kind, and its one hash index lists the records of every kind for a
+  // key, so a lookup of one kind in a dictionary that has none of it would
+  // still read each record the index lists for the key, as one of meta rows
+  // reads every term record of a reading.
+  std::vector<std::string> dictionaries;
 };
 
 template <typename T>
@@ -157,14 +170,18 @@ void read_image_sizes(const std::filesystem::path& directory, std::vector<Report
 // The loaded dictionaries of a kind.
 Dictionaries dictionaries(DictionaryKind kind) { return QueryAccess::dictionaries(g_query, kind); }
 
-// Runs `get` for each key of the JSON array `keys_json`: [[result, ...], ...],
-// after `prepare` with them all.
+// The loaded dictionaries of a kind that are among `names`, in load order.
+Dictionaries dictionaries(DictionaryKind kind, const std::vector<std::string>& names) {
+  Dictionaries list = dictionaries(kind);
+  std::erase_if(list,
+                [&](const DictionaryFiles& dict) { return std::ranges::find(names, *dict.name) == names.end(); });
+  return list;
+}
+
+// Runs `get` for each of `keys`: [[result, ...], ...], after `prepare` with
+// them all.
 template <typename Key, typename Get, typename Prepare = void (*)(const std::vector<Key>&)>
-const char* each_key(const char* keys_json, Get&& get, Prepare&& prepare = [](const std::vector<Key>&) {}) {
-  std::vector<Key> keys;
-  if (!read(keys, keys_json)) {
-    return write_error("invalid request");
-  }
+const char* each_key(const std::vector<Key>& keys, Get&& get, Prepare&& prepare = [](const std::vector<Key>&) {}) {
   try {
     prepare(keys);
     std::vector<decltype(get(keys.front()))> out;
@@ -227,19 +244,28 @@ EMSCRIPTEN_KEEPALIVE int yh_add(const char* path) {
 
 EMSCRIPTEN_KEEPALIVE void yh_remove(const char* path) { g_query.remove_dict(path); }
 
-// ["key", ...] -> [[TermRow, ...], ...], without glossaries.
-EMSCRIPTEN_KEEPALIVE const char* yh_find_terms(const char* keys_json) {
-  const Dictionaries terms = dictionaries(DictionaryKind::Term);
+// {"keys": ["key", ...], "dictionaries": ["name", ...]} -> [[TermRow, ...], ...],
+// without glossaries.
+EMSCRIPTEN_KEEPALIVE const char* yh_find_terms(const char* request_json) {
+  Lookup<std::string> request;
+  if (!read(request, request_json)) {
+    return write_error("invalid request");
+  }
+  const Dictionaries terms = dictionaries(DictionaryKind::Term, request.dictionaries);
   const Dictionaries* lists[] = {&terms};
   return each_key<std::string>(
-      keys_json, [&](const std::string& key) { return query_rows(terms, key); },
+      request.keys, [&](const std::string& key) { return query_rows(terms, key); },
       [&](const std::vector<std::string>& keys) { prefetch_records(lists, keys); });
 }
 
 // [["dictionary", sequence], ...] -> [[TermRow, ...], ...], without glossaries.
 EMSCRIPTEN_KEEPALIVE const char* yh_find_terms_by_sequence(const char* items_json) {
+  std::vector<std::tuple<std::string, int64_t>> items;
+  if (!read(items, items_json)) {
+    return write_error("invalid request");
+  }
   const Dictionaries terms = dictionaries(DictionaryKind::Term);
-  return each_key<std::tuple<std::string, int64_t>>(items_json, [&](const auto& item) {
+  return each_key(items, [&](const auto& item) {
     return query_sequence_rows(terms, std::get<0>(item), std::get<1>(item));
   });
 }
@@ -269,31 +295,43 @@ EMSCRIPTEN_KEEPALIVE const char* yh_glossaries(const char* items_json) {
   }
 }
 
-// ["key", ...] -> [[MetaRow, ...], ...]
-EMSCRIPTEN_KEEPALIVE const char* yh_find_term_meta(const char* keys_json) {
-  const Dictionaries frequencies = dictionaries(DictionaryKind::Frequency);
-  const Dictionaries pitches = dictionaries(DictionaryKind::Pitch);
+// {"keys": ["key", ...], "dictionaries": ["name", ...]} -> [[MetaRow, ...], ...]
+EMSCRIPTEN_KEEPALIVE const char* yh_find_term_meta(const char* request_json) {
+  Lookup<std::string> request;
+  if (!read(request, request_json)) {
+    return write_error("invalid request");
+  }
+  const Dictionaries frequencies = dictionaries(DictionaryKind::Frequency, request.dictionaries);
+  const Dictionaries pitches = dictionaries(DictionaryKind::Pitch, request.dictionaries);
   const Dictionaries* lists[] = {&frequencies, &pitches};
   return each_key<std::string>(
-      keys_json, [&](const std::string& key) { return query_meta_rows(lists, key); },
+      request.keys, [&](const std::string& key) { return query_meta_rows(lists, key); },
       [&](const std::vector<std::string>& keys) { prefetch_records(lists, keys); });
 }
 
-// ["character", ...] -> [[KanjiRow, ...], ...]
-EMSCRIPTEN_KEEPALIVE const char* yh_find_kanji(const char* keys_json) {
-  const Dictionaries kanji = dictionaries(DictionaryKind::Kanji);
+// {"keys": ["character", ...], "dictionaries": ["name", ...]} -> [[KanjiRow, ...], ...]
+EMSCRIPTEN_KEEPALIVE const char* yh_find_kanji(const char* request_json) {
+  Lookup<std::string> request;
+  if (!read(request, request_json)) {
+    return write_error("invalid request");
+  }
+  const Dictionaries kanji = dictionaries(DictionaryKind::Kanji, request.dictionaries);
   const Dictionaries* lists[] = {&kanji};
   return each_key<std::string>(
-      keys_json, [&](const std::string& key) { return query_kanji_rows(kanji, key); },
+      request.keys, [&](const std::string& key) { return query_kanji_rows(kanji, key); },
       [&](const std::vector<std::string>& keys) { prefetch_records(lists, keys); });
 }
 
-// ["character", ...] -> [[MetaRow, ...], ...]
-EMSCRIPTEN_KEEPALIVE const char* yh_find_kanji_meta(const char* keys_json) {
-  const Dictionaries frequencies = dictionaries(DictionaryKind::Frequency);
+// {"keys": ["character", ...], "dictionaries": ["name", ...]} -> [[MetaRow, ...], ...]
+EMSCRIPTEN_KEEPALIVE const char* yh_find_kanji_meta(const char* request_json) {
+  Lookup<std::string> request;
+  if (!read(request, request_json)) {
+    return write_error("invalid request");
+  }
+  const Dictionaries frequencies = dictionaries(DictionaryKind::Frequency, request.dictionaries);
   const Dictionaries* lists[] = {&frequencies};
   return each_key<std::string>(
-      keys_json, [&](const std::string& key) { return query_kanji_meta_rows(frequencies, key); },
+      request.keys, [&](const std::string& key) { return query_kanji_meta_rows(frequencies, key); },
       [&](const std::vector<std::string>& keys) { prefetch_records(lists, keys); });
 }
 

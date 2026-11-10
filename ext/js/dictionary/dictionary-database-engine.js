@@ -143,7 +143,7 @@ export class DictionaryDatabaseEngine {
     async findTermsBulk(termList, dictionaryNames) {
         const hoshidicts = await this._getHoshidicts();
         const enabled = new Set(dictionaryNames);
-        const rowLists = hoshidicts.findTerms(termList);
+        const rowLists = hoshidicts.findTerms(termList, this._getDictionariesWith(dictionaryNames, 'terms'));
         /** @type {Set<number>} */
         const visited = new Set();
         /** @type {import('dictionary-database').TermEntry[]} */
@@ -169,7 +169,7 @@ export class DictionaryDatabaseEngine {
     async findTermsExactBulk(termList, dictionaryNames) {
         const hoshidicts = await this._getHoshidicts();
         const enabled = new Set(dictionaryNames);
-        const rowLists = hoshidicts.findTerms(termList.map(({term}) => term));
+        const rowLists = hoshidicts.findTerms(termList.map(({term}) => term), this._getDictionariesWith(dictionaryNames, 'terms'));
         /** @type {import('dictionary-database').TermEntry[]} */
         const results = [];
         for (let i = 0, ii = rowLists.length; i < ii; ++i) {
@@ -221,7 +221,7 @@ export class DictionaryDatabaseEngine {
     async findTermMetaBulk(termList, dictionaryNames) {
         const hoshidicts = await this._getHoshidicts();
         const enabled = new Set(dictionaryNames);
-        const rowLists = hoshidicts.findTermMeta(termList);
+        const rowLists = hoshidicts.findTermMeta(termList, this._getDictionariesWith(dictionaryNames, 'termMeta'));
         /** @type {import('dictionary-database').TermMeta[]} */
         const results = [];
         for (let index = 0, ii = rowLists.length; index < ii; ++index) {
@@ -247,7 +247,7 @@ export class DictionaryDatabaseEngine {
     async findKanjiBulk(kanjiList, dictionaryNames) {
         const hoshidicts = await this._getHoshidicts();
         const enabled = new Set(dictionaryNames);
-        const rowLists = hoshidicts.findKanji(kanjiList);
+        const rowLists = hoshidicts.findKanji(kanjiList, this._getDictionariesWith(dictionaryNames, 'kanji'));
         /** @type {import('dictionary-database').KanjiEntry[]} */
         const results = [];
         for (let index = 0, ii = rowLists.length; index < ii; ++index) {
@@ -276,7 +276,7 @@ export class DictionaryDatabaseEngine {
     async findKanjiMetaBulk(kanjiList, dictionaryNames) {
         const hoshidicts = await this._getHoshidicts();
         const enabled = new Set(dictionaryNames);
-        const rowLists = hoshidicts.findKanjiMeta(kanjiList);
+        const rowLists = hoshidicts.findKanjiMeta(kanjiList, this._getDictionariesWith(dictionaryNames, 'kanjiMeta'));
         /** @type {import('dictionary-database').KanjiMeta[]} */
         const results = [];
         for (let index = 0, ii = rowLists.length; index < ii; ++index) {
@@ -446,6 +446,21 @@ export class DictionaryDatabaseEngine {
     }
 
     // Private
+
+    /**
+     * The dictionaries of the list that have records of a kind. hoshidicts reads the records that the index of each
+     * dictionary it looks in lists for a key, of every kind, so a dictionary with none of the kind looked up would
+     * still be read for nothing: a lookup of frequencies would read the term records of a reading in every dictionary.
+     * @param {string[]} dictionaryNames
+     * @param {'terms'|'termMeta'|'kanji'|'kanjiMeta'} kind
+     * @returns {string[]}
+     */
+    _getDictionariesWith(dictionaryNames, kind) {
+        return dictionaryNames.filter((name) => {
+            const counts = this._dictionaryMap.get(name)?.record.summary.counts;
+            return typeof counts === 'undefined' || counts[kind].total > 0;
+        });
+    }
 
     /**
      * @template [T=void]
