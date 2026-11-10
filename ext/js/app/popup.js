@@ -1248,27 +1248,46 @@ export class Popup extends EventDispatcher {
      */
     _convertSourceRectsCoordinateSpace(sourceRects) {
         let scale = computeZoomScale(this._container);
-        if (scale === 1) { return sourceRects; }
+        const origin = this._getFrameOrigin();
+        if (scale === 1 && origin.left === 0 && origin.top === 0) { return sourceRects; }
         scale = 1 / scale;
         const sourceRects2 = [];
         for (const rect of sourceRects) {
-            sourceRects2.push(this._createScaledRect(rect, scale));
+            sourceRects2.push(this._createScaledRect(rect, origin, scale));
         }
         return sourceRects2;
     }
 
     /**
-     * Creates a scaled rectangle.
-     * @param {import('popup').Rect} rect The rectangle to scale.
-     * @param {number} scale The scale factor.
-     * @returns {import('popup').Rect} A new rectangle which has been scaled.
+     * Gets where the frame is placed at `left: 0; top: 0`, in client coordinates. These are the same in most browsers,
+     * but while a page is zoomed in, Safari on iOS gives client coordinates from the visual viewport and places fixed
+     * elements in the layout viewport, so the frame's origin is the visual viewport's offset above and to the left.
+     * @returns {{left: number, top: number}} The client coordinates of the frame's origin.
      */
-    _createScaledRect(rect, scale) {
+    _getFrameOrigin() {
+        const {style} = this._frame;
+        const {left, top} = style;
+        style.left = '0';
+        style.top = '0';
+        const rect = this._frame.getBoundingClientRect();
+        style.left = left;
+        style.top = top;
+        return {left: rect.left, top: rect.top};
+    }
+
+    /**
+     * Creates a translated and scaled rectangle.
+     * @param {import('popup').Rect} rect The rectangle to convert.
+     * @param {{left: number, top: number}} origin The origin to translate the rectangle by, before scaling.
+     * @param {number} scale The scale factor.
+     * @returns {import('popup').Rect} A new rectangle which has been converted.
+     */
+    _createScaledRect(rect, origin, scale) {
         return {
-            left: rect.left * scale,
-            top: rect.top * scale,
-            right: rect.right * scale,
-            bottom: rect.bottom * scale,
+            left: (rect.left - origin.left) * scale,
+            top: (rect.top - origin.top) * scale,
+            right: (rect.right - origin.left) * scale,
+            bottom: (rect.bottom - origin.top) * scale,
         };
     }
 }
