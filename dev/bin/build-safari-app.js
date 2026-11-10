@@ -35,17 +35,19 @@
 // certificate, as builds/yomitan-safari-app/ipa/OwOtan.ipa. The App Store does not allow the app extension to play
 // audio, so audio plays in the page, where Safari needs a gesture before it plays. With --upload, exporting uploads
 // it to App Store Connect instead, through the account signed in to Xcode, where it can be tested with TestFlight.
-// App Store Connect needs each upload to have a higher build number, so --app-store needs --version.
+// App Store Connect needs each upload to have a higher build number, so --app-store needs --version or --build.
 //
 // --developer-id archives the app for macOS and exports it signed with a Developer ID Application certificate, to
 // share outside the Mac App Store; Safari 18.4 and later load its extension. Apple then notarizes it, with the
 // credentials that `xcrun notarytool store-credentials` saved under the name given with --keychain-profile, and the
 // app is stapled and zipped as builds/yomitan-safari-app/developer-id/OwOtan.zip.
 //
-// --version sets the version of the extension, as `npm run build -- --version` does, and the version and build
-// number of the app. It is up to three numbers separated by periods, such as 20261109.3.
+// --version sets the version of the app, and --build its build number, which is the version unless given. Each is up
+// to three numbers separated by periods, such as 20261109 and 20261109.1. The build number is also the version of the
+// extension, as `npm run build -- --version` sets it.
 //
 // node dev/bin/build-safari-app.js [--platform macos|ios-simulator|ios] [--team <id>] [--version <version>]
+//     [--build <build number>]
 //     [--ipa [--identity <type>] | --app-store [--upload] | --developer-id --keychain-profile <name>]
 //     [--bundle-id <id>] [--project-only]
 
@@ -102,6 +104,7 @@ const {values: args} = parseArgs({
         'developer-id': {type: 'boolean', default: false},
         'keychain-profile': {type: 'string'},
         'version': {type: 'string'},
+        'build': {type: 'string'},
         'bundle-id': {type: 'string', default: 'org.owotan.dev'},
         'project-only': {type: 'boolean', default: false},
     },
@@ -126,8 +129,11 @@ if (typeof ipaExportMethod === 'undefined') {
     throw new Error(`An IPA is signed with one of ${Object.keys(ipaExportMethods).join(', ')}`);
 }
 const version = args.version;
-if (typeof version === 'string' && !/^\d+(\.\d+){0,2}$/.test(version)) {
-    throw new Error(`The version ${version} is not up to three numbers separated by periods`);
+const buildNumber = args.build ?? version;
+for (const [name, value] of [['version', version], ['build number', buildNumber]]) {
+    if (typeof value === 'string' && !/^\d+(\.\d+){0,2}$/.test(value)) {
+        throw new Error(`The ${name} ${value} is not up to three numbers separated by periods`);
+    }
 }
 if (args['app-store']) {
     if (args.platform !== 'ios' || typeof team !== 'string') {
@@ -136,8 +142,8 @@ if (args['app-store']) {
     if (args.ipa) {
         throw new Error('--app-store exports its own IPA; pass either --ipa or --app-store');
     }
-    if (typeof version !== 'string') {
-        throw new Error('App Store Connect needs a higher build number for each upload; pass --version');
+    if (typeof buildNumber !== 'string') {
+        throw new Error('App Store Connect needs a higher build number for each upload; pass --version or --build');
     }
 }
 if (args['developer-id']) {
@@ -155,7 +161,7 @@ if (args.upload && !args['app-store']) {
     throw new Error('--upload sends a build for App Store Connect; pass --app-store');
 }
 
-run('node', [path.join(dirname, 'build.js'), '--target', 'safari', ...(typeof version === 'string' ? ['--version', version] : [])]);
+run('node', [path.join(dirname, 'build.js'), '--target', 'safari', ...(typeof buildNumber === 'string' ? ['--version', buildNumber] : [])]);
 // The project gets its own copy of the extension, so that rebuilding the extension does not change it.
 run('xcrun', ['safari-web-extension-converter', '--project-location', appDirectory, '--app-name', appName, '--bundle-identifier', args['bundle-id'], '--swift', '--copy-resources', '--no-open', '--no-prompt', '--force', extensionDirectory]);
 // The extension sends native messages to the app extension, which this handler answers.
@@ -261,14 +267,13 @@ if ([...projectFile.matchAll(iosDeploymentTargetPattern)].length === 0) {
     throw new Error('The Xcode project sets no iOS deployment target');
 }
 projectFile = projectFile.replace(iosDeploymentTargetPattern, 'IPHONEOS_DEPLOYMENT_TARGET = 18.0;');
-if (typeof version === 'string') {
-    for (const setting of ['MARKETING_VERSION', 'CURRENT_PROJECT_VERSION']) {
-        const pattern = new RegExp(`${setting} = [^;]*;`, 'g');
-        if ([...projectFile.matchAll(pattern)].length === 0) {
-            throw new Error(`The Xcode project sets no ${setting}`);
-        }
-        projectFile = projectFile.replace(pattern, `${setting} = ${version};`);
+for (const [setting, value] of [['MARKETING_VERSION', version], ['CURRENT_PROJECT_VERSION', buildNumber]]) {
+    if (typeof value !== 'string') { continue; }
+    const pattern = new RegExp(`${setting} = [^;]*;`, 'g');
+    if ([...projectFile.matchAll(pattern)].length === 0) {
+        throw new Error(`The Xcode project sets no ${setting}`);
     }
+    projectFile = projectFile.replace(pattern, `${setting} = ${value};`);
 }
 // Automatic signing registers the group, and adds it to the profiles, only for the targets that have it as a capability.
 for (const targetName of [`${appName} (iOS)`, `${appName} Extension (iOS)`]) {
@@ -310,7 +315,7 @@ const archivePath = path.join(appDirectory, `${appName}.xcarchive`);
 const exportPath = path.join(appDirectory, args['developer-id'] ? 'developer-id' : 'ipa');
 const exportOptionsPath = path.join(appDirectory, 'ExportOptions.plist');
 run('xcodebuild', [...buildArgs, '-archivePath', archivePath, 'archive']);
-// For App Store Connect, exporting would otherwise give the build a number of its own instead of --version
+// For App Store Connect, exporting would otherwise give the build a number of its own instead of --build
 const appStoreOptions = args['app-store'] ?
     `
     <key>manageAppVersionAndBuildNumber</key>
@@ -353,7 +358,7 @@ if (args['developer-id']) {
     run('ditto', ['-c', '-k', '--keepParent', appPath, zipPath]);
     console.log(`Built ${zipPath}`);
 } else if (args.upload) {
-    console.log(`Uploaded ${appName} ${version} to App Store Connect`);
+    console.log(`Uploaded ${appName} ${version ?? ''} (${buildNumber}) to App Store Connect`);
 } else {
     console.log(`Built ${path.join(exportPath, `${appName}.ipa`)}`);
 }
