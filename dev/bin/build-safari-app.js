@@ -92,6 +92,21 @@ function run(command, args, env = process.env) {
     execFileSync(command, args, {cwd: rootDirectory, stdio: 'inherit', env});
 }
 
+/**
+ * Removes the LaunchServices records of copies of the app, also of copies that no longer exist.
+ * @param {string[]} appPaths
+ */
+function unregisterApps(appPaths) {
+    const lsregister = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister';
+    for (const appPath of appPaths) {
+        try {
+            execFileSync(lsregister, ['-u', appPath], {stdio: 'ignore'});
+        } catch (e) {
+            // It wasn't registered
+        }
+    }
+}
+
 const {values: args} = parseArgs({
     args: process.argv.slice(2),
     options: {
@@ -374,6 +389,15 @@ if (args['developer-id']) {
     run('xcrun', ['stapler', 'staple', appPath]);
     fs.rmSync(zipPath);
     run('ditto', ['-c', '-k', '--keepParent', appPath, zipPath]);
+    // LaunchServices registers the copies of the app that archiving and exporting make, and keeps the record of a
+    // copy after it is deleted, as the one that archiving installs in DerivedData is. Safari then finds no app for the
+    // extension when it launches, takes the extension to have been removed, and adds it again turned off, at a new
+    // address that has none of its data. So only the copy that the user installs stays registered.
+    unregisterApps([
+        path.join(derivedDataPath, 'Build', 'Intermediates.noindex', 'ArchiveIntermediates', platform.scheme, 'InstallationBuildProductsLocation', 'Applications', `${appName}.app`),
+        path.join(archivePath, 'Products', 'Applications', `${appName}.app`),
+        appPath,
+    ]);
     console.log(`Built ${zipPath}`);
 } else if (args.upload) {
     console.log(`Uploaded ${appName} ${version ?? ''} (${buildNumber}) to App Store Connect`);
