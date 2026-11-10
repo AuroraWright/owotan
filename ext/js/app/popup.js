@@ -25,6 +25,7 @@ import {safePerformance} from '../core/safe-performance.js';
 import {deepEqual} from '../core/utilities.js';
 import {addFullscreenChangeEventListener, computeZoomScale, convertRectZoomCoordinates, getFullscreenElement} from '../dom/document-util.js';
 import {loadStyle} from '../dom/style-util.js';
+import {isSafariExtension} from '../extension/app-extension.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
 import {ThemeController} from './theme-controller.js';
 
@@ -577,7 +578,16 @@ export class Popup extends EventDispatcher {
                 throw new PopupError('Popup not supported in this context', this);
             }
             const url = chrome.runtime.getURL('/popup.html');
-            if (useSecurePopupFrameUrl) {
+            if (isSafariExtension()) {
+                // Safari 18 refuses to navigate a frame that is already in the document to an extension page, from
+                // its URL or its location, so the frame is taken out of the document while its URL is set.
+                const {parentNode, nextSibling} = frame;
+                frame.remove();
+                frame.setAttribute('src', url);
+                if (parentNode !== null) {
+                    parentNode.insertBefore(frame, nextSibling);
+                }
+            } else if (useSecurePopupFrameUrl) {
                 contentDocument.location.href = url;
             } else {
                 frame.setAttribute('src', url);

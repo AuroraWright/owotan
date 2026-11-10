@@ -164,6 +164,12 @@ if (args.upload && !args['app-store']) {
 run('node', [path.join(dirname, 'build.js'), '--target', 'safari', ...(typeof buildNumber === 'string' ? ['--version', buildNumber] : [])]);
 // The project gets its own copy of the extension, so that rebuilding the extension does not change it.
 run('xcrun', ['safari-web-extension-converter', '--project-location', appDirectory, '--app-name', appName, '--bundle-identifier', args['bundle-id'], '--swift', '--copy-resources', '--no-open', '--no-prompt', '--force', extensionDirectory]);
+// Xcode 27 and later write the project as project.xcproj, which the edits below do not read, so it is converted to
+// project.pbxproj.
+const xcodeProjectPath = path.join(appDirectory, appName, `${appName}.xcodeproj`);
+if (fs.existsSync(path.join(xcodeProjectPath, 'project.xcproj'))) {
+    run('xcodebuild', ['-project', xcodeProjectPath, '-convert-project', 'pbxproj']);
+}
 // The extension sends native messages to the app extension, which this handler answers.
 fs.copyFileSync(path.join(rootDirectory, 'dev', 'safari', 'SafariWebExtensionHandler.swift'), path.join(appDirectory, appName, 'Shared (Extension)', 'SafariWebExtensionHandler.swift'));
 // The macOS app serves the Yomitan API (AppDelegate.swift), for which its sandbox has to let it accept connections.
@@ -278,6 +284,18 @@ for (const [setting, value] of [['MARKETING_VERSION', version], ['CURRENT_PROJEC
 // Automatic signing registers the group, and adds it to the profiles, only for the targets that have it as a capability.
 for (const targetName of [`${appName} (iOS)`, `${appName} Extension (iOS)`]) {
     const target = new RegExp(`(\\w+) /\\* ${targetName.replace(/[()]/g, '\\$&')} \\*/ = \\{\\s*isa = PBXNativeTarget;`).exec(projectFile);
+    // A project that Xcode 27 converted from project.xcproj has no attributes for its targets, so they are added.
+    if (target !== null && !new RegExp(`\\t+${target[1]} = \\{\\n`).test(projectFile)) {
+        const projectAttributes = /(\t+)isa = PBXProject;\n\t+attributes = \{\n/.exec(projectFile);
+        if (projectAttributes === null) {
+            throw new Error('The attributes of the project were not found in the Xcode project');
+        }
+        const indent = `${projectAttributes[1]}\t`;
+        if (!projectFile.includes('TargetAttributes = {\n')) {
+            projectFile = projectFile.replace(projectAttributes[0], `${projectAttributes[0]}${indent}TargetAttributes = {\n${indent}};\n`);
+        }
+        projectFile = projectFile.replace(/(\t+)TargetAttributes = \{\n/, (match, tabs) => `${match}${tabs}\t${target[1]} = {\n${tabs}\t};\n`);
+    }
     const attributes = target !== null ? new RegExp(`(\\t+)${target[1]} = \\{\\n`).exec(projectFile) : null;
     if (target === null || attributes === null) {
         throw new Error(`The target ${targetName} was not found in the Xcode project`);
