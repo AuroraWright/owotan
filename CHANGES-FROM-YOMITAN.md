@@ -135,6 +135,8 @@ Along the way it also fixes some performance and layout problems.
   only needed for the Yomitan API.
 - **Settings versioning.** The fork's settings are versioned separately (`options.forkVersion`), so Yomitan's own
   settings updates still apply when they're merged in.
+- **No scan key on phones.** On iOS and Android, the default settings scan with the mouse without a key (the "Scan
+  modifier key" setting shows "No key"), since phones have no modifier keys. Other platforms keep Shift.
 - **Welcome guide.** Opens only the first time the extension starts after it's installed, not on every browser
   startup. The "Show the welcome guide on browser startup" setting is gone; `general.showGuide` stays in the settings
   for compatibility with Yomitan but is ignored.

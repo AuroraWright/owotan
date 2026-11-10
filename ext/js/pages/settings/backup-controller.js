@@ -502,7 +502,8 @@ export class BackupController {
         }
 
         // Get default options
-        const optionsFull = this._optionsUtil.getDefault();
+        const {platform} = await this._settingsController.application.api.getEnvironmentInfo();
+        const optionsFull = this._optionsUtil.getDefault(platform.os);
 
         // Update dictionaries
         await DictionaryController.ensureDictionarySettings(this._settingsController, void 0, optionsFull, false, false);

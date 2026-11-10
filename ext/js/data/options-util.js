@@ -114,9 +114,10 @@ export class OptionsUtil {
     }
 
     /**
+     * @param {import('environment').OperatingSystem} [os] The platform, whose default settings can differ.
      * @returns {Promise<import('settings').Options>}
      */
-    async load() {
+    async load(os) {
         let options;
         try {
             const optionsStr = await new Promise((resolve, reject) => {
@@ -141,7 +142,7 @@ export class OptionsUtil {
             options = await this.update(options);
             await this.save(options);
         } else {
-            options = this.getDefault();
+            options = this.getDefault(os);
         }
 
         return options;
@@ -165,13 +166,22 @@ export class OptionsUtil {
     }
 
     /**
+     * @param {import('environment').OperatingSystem} [os] The platform, whose default settings can differ.
      * @returns {import('settings').Options}
      */
-    getDefault() {
+    getDefault(os) {
         const optionsVersion = this._getVersionUpdates(null).length;
         const options = /** @type {import('settings').Options} */ (/** @type {JsonSchema} */ (this._optionsSchema).getValidValueOrDefault());
         options.version = optionsVersion;
         options.forkVersion = this._getForkVersionUpdates().length;
+        if (os === 'ios' || os === 'android') {
+            // Phones have no modifier keys, so the mouse scans with "No key", as on a tablet with a mouse
+            for (const {options: {scanning: {inputs}}} of options.profiles) {
+                for (const input of inputs) {
+                    if (input.types.mouse && input.include === 'shift') { input.include = ''; }
+                }
+            }
+        }
         return options;
     }
 

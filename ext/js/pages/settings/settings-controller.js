@@ -251,7 +251,8 @@ export class SettingsController extends EventDispatcher {
     async getDefaultOptions() {
         const optionsUtil = new OptionsUtil();
         await optionsUtil.prepare();
-        return optionsUtil.getDefault();
+        const {platform} = await this._application.api.getEnvironmentInfo();
+        return optionsUtil.getDefault(platform.os);
     }
 
     // Private

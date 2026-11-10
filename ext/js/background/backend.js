@@ -406,7 +406,7 @@ export class Backend {
 
             await this._optionsUtil.prepare();
             this._defaultAnkiFieldTemplates = (await fetchText('/data/templates/default-anki-field-templates.handlebars')).trim();
-            this._options = await this._optionsUtil.load();
+            this._options = await this._optionsUtil.load(this._environment.getInfo().platform.os);
 
             this._applyOptions('background');
 

@@ -813,6 +813,22 @@ describe('OptionsUtil', () => {
             const optionsUpdated = await optionsUtil.update(structuredClone(optionsModified));
             expect(structuredClone(optionsUpdated)).toStrictEqual(structuredClone(options));
         });
+
+        /** @type {[os: import('environment').OperatingSystem, include: string][]} */
+        const platformData = [
+            ['ios', ''],
+            ['android', ''],
+            ['mac', 'shift'],
+            ['win', 'shift'],
+        ];
+
+        test.each(platformData)('default-platform-test-%s', async (os, include) => {
+            const optionsUtil = new OptionsUtil();
+            await optionsUtil.prepare();
+
+            const {scanning: {inputs}} = optionsUtil.getDefault(os).profiles[0].options;
+            expect(inputs.map((input) => input.include)).toStrictEqual([include, '']);
+        });
     });
 
     describe('FieldTemplatesUpdate', () => {
