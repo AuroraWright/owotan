@@ -412,10 +412,7 @@ export class Backend {
 
             this._attachOmniboxListener();
 
-            const options = this._getProfileOptions({current: true}, false);
-            if (options.general.showGuide) {
-                void this._openWelcomeGuidePageOnce();
-            }
+            void this._openWelcomeGuidePageOnFirstStart();
 
             const {browser} = this._environment.getInfo();
             if (browser === 'safari') {
@@ -3358,15 +3355,22 @@ export class Backend {
     }
 
     /**
+     * Opens the welcome guide when the extension first starts after it's installed. general.showGuide, which opened it
+     * on every browser startup, is kept for settings shared with Yomitan, but is ignored. Safari reports an install
+     * for every reload of the extension too, so the first start is saved instead, and saved settings mean that the
+     * extension was used before.
      * @returns {Promise<void>}
      */
-    async _openWelcomeGuidePageOnce() {
-        const result = await chrome.storage.session.get(['openedWelcomePage']);
-        if (!result.openedWelcomePage) {
-            await Promise.all([
-                this._openWelcomeGuidePage(),
-                chrome.storage.session.set({openedWelcomePage: true}),
-            ]);
+    async _openWelcomeGuidePageOnFirstStart() {
+        try {
+            const {welcomePageOpened, options} = await chrome.storage.local.get(['welcomePageOpened', 'options']);
+            if (welcomePageOpened === true) { return; }
+            await chrome.storage.local.set({welcomePageOpened: true});
+            if (typeof options === 'undefined') {
+                await this._openWelcomeGuidePage();
+            }
+        } catch (e) {
+            log.error(e);
         }
     }
 
