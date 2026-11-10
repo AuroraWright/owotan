@@ -61,7 +61,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 /// the app shares with the app extension. The copy is a clone, which takes no more space until either file changes.
 enum LocalAudioStorage {
     private static let fileName = "android.db"
+    private static let placeholderFileName = "Put android.db here.txt"
     private static let queue = DispatchQueue(label: "org.owotan.local-audio-storage", qos: .utility)
+
+    /// The Files app shows no folder for an app whose folder is empty, so an empty folder gets an empty file whose name
+    /// says what to put in it.
+    private static func addPlaceholderIfEmpty(_ documents: URL) {
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: documents.path), contents.isEmpty else { return }
+        FileManager.default.createFile(atPath: documents.appendingPathComponent(placeholderFileName).path, contents: nil)
+    }
 
     /// Copies the file again if it changed, and deletes the copy if the user deleted the file.
     static func update() {
@@ -73,6 +81,7 @@ enum LocalAudioStorage {
                 let bundleIdentifier = Bundle.main.bundleIdentifier,
                 let shared = fileManager.containerURL(forSecurityApplicationGroupIdentifier: "group.\(bundleIdentifier)")
             else { return }
+            addPlaceholderIfEmpty(documents)
             let file = documents.appendingPathComponent(fileName)
             let copy = shared.appendingPathComponent(fileName)
 
