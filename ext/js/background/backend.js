@@ -69,10 +69,17 @@ const ANKI_COLLECTION_COPY_CHECK_INTERVAL = 5 * 60 * 1000;
 const SAFARI_SUSPENDED_HIDDEN_DURATION = 10 * 1000;
 
 /**
- * How often the backend posts a message to a frame's port on Safari, in milliseconds. Safari keeps the background page
- * loaded while it has open ports to which it posted in the last 2 minutes.
+ * How often the backend posts a message to a frame's port on Safari, or opens a port to the app extension again on
+ * macOS, in milliseconds. Safari keeps the background page loaded while it has open ports that it opened or posted to
+ * in the last 2 minutes.
  */
 const SAFARI_KEEP_LOADED_INTERVAL = 60 * 1000;
+
+/**
+ * How long a port to the app extension on Safari for macOS must have been open for the backend to open it again as soon
+ * as Safari closes it, in milliseconds.
+ */
+const SAFARI_APP_EXTENSION_PORT_MIN_DURATION = 10 * 1000;
 
 /**
  * How long after the extension reloads on Safari for macOS to run the background page at a higher priority the next
@@ -196,6 +203,10 @@ export class Backend {
         this._applicationReadyHandlers = new Map();
         /** @type {Map<number, Map<number, chrome.runtime.Port>>} */
         this._tabMessagePorts = new Map();
+        /** @type {boolean} */
+        this._safariAppExtensionPortKeepsLoaded = false;
+        /** @type {?chrome.runtime.Port} */
+        this._safariAppExtensionPort = null;
         /** @type {Map<number, {port: chrome.runtime.Port, callback: (response: unknown) => void}>} */
         this._tabMessagePortCallbacks = new Map();
         /** @type {number} */
@@ -439,8 +450,13 @@ export class Backend {
      * a lookup to load what lookups need.
      */
     async _prepareSafariBackground() {
+        const isMac = this._environment.getInfo().platform.os === 'mac';
+        if (isMac) {
+            this._safariAppExtensionPortKeepsLoaded = true;
+            this._reopenSafariAppExtensionPort();
+        }
         setInterval(this._keepSafariBackgroundLoaded.bind(this), SAFARI_KEEP_LOADED_INTERVAL);
-        if (this._environment.getInfo().platform.os === 'mac') {
+        if (isMac) {
             try {
                 if (await this._reloadInExtensionPageProcess()) { return; }
             } catch (e) {
@@ -456,9 +472,15 @@ export class Backend {
      * and the first lookup after loads the dictionaries again. Frames send heartbeats, but Safari delays or stops the
      * timers of pages that aren't shown, as while another app is in front, and the background page was unloaded
      * every few minutes. It stays loaded while it has an open port that it posted to in the last 2 minutes, which
-     * this does through a frame's port for its messages, so that it stays loaded while a page has Yomitan.
+     * this does through a frame's port for its messages, so that it stays loaded while a page has Yomitan. On macOS,
+     * where the Yomitan API and the clipboard monitor need it while no page has Yomitan, as when only Safari's start
+     * page is open, a port to the app extension keeps it loaded instead (see _reopenSafariAppExtensionPort).
      */
     _keepSafariBackgroundLoaded() {
+        if (this._safariAppExtensionPortKeepsLoaded) {
+            this._reopenSafariAppExtensionPort();
+            return;
+        }
         /** @type {import('web-extension').PortMessage} */
         const portMessage = {id: null, message: null};
         for (const framePorts of this._tabMessagePorts.values()) {
@@ -471,6 +493,35 @@ export class Backend {
                 }
             }
         }
+    }
+
+    /**
+     * Opens a port to the app extension again, to keep the background page loaded on Safari for macOS, which counts
+     * opening a port as using it. Safari forgets all of the page's ports as soon as any one of them closes (WebKit's
+     * `WebExtensionContext::removePort` drops the page from its map once the count for that port's channel reaches
+     * zero), and would unload the page 30 s later, so this is also done whenever one of its ports disconnects. The port
+     * is closed before the new one opens, as closing it makes Safari forget the new one too.
+     */
+    _reopenSafariAppExtensionPort() {
+        if (!this._safariAppExtensionPortKeepsLoaded) { return; }
+        const oldPort = this._safariAppExtensionPort;
+        this._safariAppExtensionPort = null;
+        if (oldPort !== null) {
+            oldPort.disconnect();
+        }
+        // Safari connects to the app extension whichever application is named
+        const port = chrome.runtime.connectNative('application.id');
+        const openTime = Date.now();
+        port.onDisconnect.addListener(() => {
+            this._checkLastError(chrome.runtime.lastError);
+            if (this._safariAppExtensionPort !== port) { return; }
+            this._safariAppExtensionPort = null;
+            // A port that Safari closes at once is opened again on the next interval, rather than over and over
+            if (Date.now() - openTime >= SAFARI_APP_EXTENSION_PORT_MIN_DURATION) {
+                this._reopenSafariAppExtensionPort();
+            }
+        });
+        this._safariAppExtensionPort = port;
     }
 
     /**
@@ -670,6 +721,7 @@ export class Backend {
      * @param {chrome.runtime.Port} port
      */
     _onConnect(port) {
+        port.onDisconnect.addListener(this._reopenSafariAppExtensionPort.bind(this));
         if (port.name !== 'tabMessages') { return; }
         const tabId = port.sender?.tab?.id;
         const frameId = port.sender?.frameId;
@@ -1564,6 +1616,7 @@ export class Backend {
                 sourcePort.disconnect();
                 sourcePort = null;
             }
+            this._reopenSafariAppExtensionPort();
         };
 
         sourcePort.onMessage.addListener((message) => {
