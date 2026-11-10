@@ -22,9 +22,15 @@ import {promiseTimeout} from '../core/utilities.js';
 import {sendAppExtensionMessage} from '../extension/app-extension.js';
 
 /**
- * How long the extension waits for itself to answer a request before it takes the next.
+ * How many requests the extension works on at once, so that quick ones, as a version check or a lookup, are not
+ * held up by a long one, as a tokenize of a long text, while not taking on more work than it can do.
  */
-const RESPONSE_TIMEOUT = 30000;
+const MAX_CONCURRENT_REQUESTS = 4;
+/**
+ * How long the extension waits for itself to answer a request before it takes another in its place, in case it
+ * never does. A request still being worked on keeps the extension busy, so this is much longer than the app waits.
+ */
+const RESPONSE_TIMEOUT = 2 * 60 * 1000;
 /** How long to wait before asking again when the server cannot be reached. */
 const RETRY_DELAY = 1000;
 /** How many polls in a row may fail before the app is asked to start again. */
@@ -34,7 +40,8 @@ const FAILURES_BEFORE_START = 5;
  * Connects the Yomitan API to the Safari app on macOS, which serves it in place of the native messaging component
  * that other browsers run (dev/safari/AppDelegate.swift). The app holds each request until the extension polls for
  * it, and the extension posts the response back. This has the interface of the native messaging port that it
- * replaces: requests arrive as `onMessage`, one at a time, and `postMessage` answers the current one.
+ * replaces: requests arrive as `onMessage`, several at a time, and `postMessage` answers the one whose `params`
+ * object it carries back, as YomitanApi's answers do.
  */
 export class YomitanApiAppConnection {
     /**
@@ -45,10 +52,13 @@ export class YomitanApiAppConnection {
         this._serverUrl = serverUrl;
         /** @type {AbortController} */
         this._abortController = new AbortController();
-        /** @type {?number} */
-        this._requestId = null;
-        /** @type {?() => void} */
-        this._onResponded = null;
+        /**
+         * The requests being worked on, by their `params` object.
+         * @type {Map<unknown, {id: number, resolve: () => void}>}
+         */
+        this._requests = new Map();
+        /** @type {number} */
+        this._failures = 0;
         /** @type {ConnectionEvent<(message: unknown) => void>} */
         this.onMessage = new ConnectionEvent();
     }
@@ -59,17 +69,18 @@ export class YomitanApiAppConnection {
     }
 
     /**
-     * Answers the current request.
-     * @param {unknown} message `{responseStatusCode, data}`, as the native messaging component takes it.
+     * Answers the request that `message.params` came with.
+     * @param {unknown} message `{params, responseStatusCode, data}`, as the native messaging component takes it.
      */
     postMessage(message) {
-        const id = this._requestId;
-        if (id === null || typeof message !== 'object' || message === null) { return; }
-        this._requestId = null;
-        const {responseStatusCode, data} = /** @type {{responseStatusCode?: unknown, data?: unknown}} */ (message);
-        const body = JSON.stringify({id, responseStatusCode, data: JSON.stringify(data ?? null)});
+        if (typeof message !== 'object' || message === null) { return; }
+        const {params, responseStatusCode, data} = /** @type {{params?: unknown, responseStatusCode?: unknown, data?: unknown}} */ (message);
+        const request = this._requests.get(params);
+        if (typeof request === 'undefined') { return; }
+        this._requests.delete(params);
+        const body = JSON.stringify({id: request.id, responseStatusCode, data: JSON.stringify(data ?? null)});
         fetch(`${this._serverUrl}/__yomitan/respond`, {method: 'POST', body, signal: this._abortController.signal}).catch(() => {});
-        if (this._onResponded !== null) { this._onResponded(); }
+        request.resolve();
     }
 
     /** */
@@ -81,9 +92,19 @@ export class YomitanApiAppConnection {
 
     /** */
     async _run() {
-        const {signal} = this._abortController;
-        let failures = 0;
         await this._startApp();
+        const polls = [];
+        for (let i = 0; i < MAX_CONCURRENT_REQUESTS; ++i) {
+            polls.push(this._poll());
+        }
+        await Promise.all(polls);
+    }
+
+    /**
+     * Polls for a request and works on it, one after another, until disconnected.
+     */
+    async _poll() {
+        const {signal} = this._abortController;
         while (!signal.aborted) {
             /** @type {Response} */
             let response;
@@ -92,13 +113,13 @@ export class YomitanApiAppConnection {
             } catch (e) {
                 if (signal.aborted) { return; }
                 // The app may still be starting, or it quit.
-                if (++failures % FAILURES_BEFORE_START === 0) {
+                if (++this._failures % FAILURES_BEFORE_START === 0) {
                     await this._startApp();
                 }
                 await promiseTimeout(RETRY_DELAY);
                 continue;
             }
-            failures = 0;
+            this._failures = 0;
             if (response.status === 204) { continue; }
             if (!response.ok) {
                 await promiseTimeout(RETRY_DELAY);
@@ -106,18 +127,23 @@ export class YomitanApiAppConnection {
             }
 
             /** @type {{id: number, action: string, params: unknown, body: string}} */
-            const {id, action, params, body} = await readResponseJson(response);
-            this._requestId = id;
-            /** @type {Promise<void>} */
-            const responded = new Promise((resolve) => {
-                this._onResponded = resolve;
-                setTimeout(resolve, RESPONSE_TIMEOUT);
+            const {id, action, params: rawParams, body} = await readResponseJson(response);
+            // The answer is told from those of other requests by this object, which each request has its own of
+            const params = typeof rawParams === 'object' && rawParams !== null ? rawParams : {};
+            await new Promise((resolve) => {
+                const timer = setTimeout(() => {
+                    this._requests.delete(params);
+                    resolve(void 0);
+                }, RESPONSE_TIMEOUT);
+                const onResponded = () => {
+                    clearTimeout(timer);
+                    resolve(void 0);
+                };
+                this._requests.set(params, {id, resolve: onResponded});
+                for (const callback of this.onMessage.callbacks) {
+                    callback({action, params, body});
+                }
             });
-            for (const callback of this.onMessage.callbacks) {
-                callback({action, params, body});
-            }
-            await responded;
-            this._onResponded = null;
         }
     }
 

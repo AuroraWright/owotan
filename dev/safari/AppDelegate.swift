@@ -166,7 +166,10 @@ final class YomitanApiServer {
                 self.handle(request, on: httpConnection)
             }
             httpConnection.onClose = { [weak self, weak httpConnection] in
-                self?.waitingPolls.removeAll { $0 === httpConnection }
+                guard let self else { return }
+                self.waitingPolls.removeAll { $0 === httpConnection }
+                // A request whose client gave up, as when it took too long, is not worth the extension's time
+                self.pendingRequests.removeAll { $0.connection === httpConnection }
             }
             httpConnection.start()
         }
