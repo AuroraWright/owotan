@@ -227,9 +227,21 @@ export class ElementOverflowController {
      * Checks which elements are long enough to be collapsible. All of them are measured together:
      * reading an element's size right after changing its classes makes the browser lay out the whole
      * page again, so checking them one at a time costs a layout for each.
+     * Their entries are laid out while they are measured: Safari before 26 reads every size in an entry that
+     * `content-visibility: auto` skips as 0, and the observer can report elements in such entries, which then were
+     * not made collapsible. Later versions lay out a skipped entry to measure it anyway.
      * @param {Element[]} elements
      */
     _updateElements(elements) {
+        /** @type {Set<HTMLElement>} */
+        const entries = new Set();
+        for (const element of elements) {
+            const entry = element.closest('.entry');
+            if (entry instanceof HTMLElement) { entries.add(entry); }
+        }
+        for (const entry of entries) {
+            entry.style.setProperty('content-visibility', 'visible');
+        }
         for (const element of elements) {
             element.classList.add('collapse-test');
         }
@@ -238,6 +250,9 @@ export class ElementOverflowController {
             const {classList} = elements[i];
             classList.toggle('collapsible', collapsible[i]);
             classList.remove('collapse-test');
+        }
+        for (const entry of entries) {
+            entry.style.removeProperty('content-visibility');
         }
     }
 
