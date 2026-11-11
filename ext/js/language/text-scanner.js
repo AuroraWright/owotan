@@ -749,6 +749,14 @@ export class TextScanner extends EventDispatcher {
                     e.stopPropagation();
                 }
                 break;
+            case 3: // Back
+            case 4: // Forward
+                // After a press of these buttons, Safari sends the page the mouse moves over other frames, such as
+                // the popup, until the next click, so the popup showed no hover styles or tooltips
+                if (this._browser === 'safari' && (this._preventBackForwardOnPage || (this._preventBackForwardOnTextHover && this._isMouseOverText))) {
+                    e.preventDefault();
+                }
+                break;
         }
 
         this._onMousePointerMove(e);
