@@ -349,6 +349,12 @@ export class Popup extends EventDispatcher {
         await this._show(sourceRects, writingMode);
 
         if (displayDetails !== null) {
+            // Safari doesn't let a frame of another origin than the page's focus itself until it was clicked, as
+            // Display.setContent does, so the frame's window is focused from here, as _focusParent does for a nested
+            // popup's parent.
+            if (displayDetails.focus && isSafariExtension()) {
+                this._frame.contentWindow?.focus();
+            }
             safePerformance.mark('invokeDisplaySetContent:start');
             void this._invokeSafe('displaySetContent', {details: displayDetails});
         }
