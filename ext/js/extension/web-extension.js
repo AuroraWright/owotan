@@ -31,6 +31,22 @@ const MESSAGE_PORT_RECONNECT_MINIMUM_AGE = 1000;
 const messagePortReconnectors = new Set();
 
 /**
+ * The ID of this frame's tab that the backend gave when the frame started. See setFrameTabId.
+ * @type {?number}
+ */
+let frameTabId = null;
+
+/**
+ * Sets the ID of this frame's tab that the frame uses. Safari gives the tabs new IDs when it reloads the extension, and
+ * the frame keeps using this one, so it gives it to the backend with the port for its messages, which it opens again
+ * then, for the backend to know which tab it means.
+ * @param {?number} tabId
+ */
+export function setFrameTabId(tabId) {
+    frameTabId = tabId;
+}
+
+/**
  * @augments EventDispatcher<import('web-extension').Events>
  */
 export class WebExtension extends EventDispatcher {
@@ -192,7 +208,9 @@ export class WebExtension extends EventDispatcher {
         /** @type {chrome.runtime.Port} */
         let port;
         try {
-            port = chrome.runtime.connect({name: 'tabMessages'});
+            /** @type {import('web-extension').MessagePortDetails} */
+            const details = {name: 'tabMessages', tabId: frameTabId};
+            port = chrome.runtime.connect({name: JSON.stringify(details)});
         } catch (e) {
             this.triggerUnloaded();
             return;

@@ -23,7 +23,7 @@ import {EventDispatcher} from './core/event-dispatcher.js';
 import {ExtensionError} from './core/extension-error.js';
 import {log} from './core/log.js';
 import {isSafariExtension} from './extension/app-extension.js';
-import {WebExtension} from './extension/web-extension.js';
+import {WebExtension, setFrameTabId} from './extension/web-extension.js';
 
 /**
  * @returns {boolean}
@@ -224,6 +224,7 @@ export class Application extends EventDispatcher {
         }, 20 * 1000);
 
         const {tabId, frameId} = await api.frameInformationGet();
+        setFrameTabId(tabId);
         const crossFrameApi = new CrossFrameAPI(api, tabId, frameId);
         // Safari only connects the backend's ports to content scripts, so an extension page never gets one (see
         // CrossFrameAPI.connectFrame). Listening for them there would make Safari offer that page the ports other

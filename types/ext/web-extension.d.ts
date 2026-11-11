@@ -36,6 +36,15 @@ export type PortResponse = {
     response: unknown;
 };
 
+/**
+ * The name of the port that a frame opens to receive its messages, as JSON. Safari gives the tabs new IDs when it
+ * reloads the extension, so the frame also gives the ID its tab had when it started, which it keeps using.
+ */
+export type MessagePortDetails = {
+    name: 'tabMessages';
+    tabId: number | null;
+};
+
 /** The backend's answer in Safari to a message sent as JSON, as JSON. */
 export type JsonResponse = {
     response?: unknown;

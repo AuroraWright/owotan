@@ -239,6 +239,12 @@ export class Backend {
         this._applicationReadyHandlers = new Map();
         /** @type {Map<number, Map<number, chrome.runtime.Port>>} */
         this._tabMessagePorts = new Map();
+        /**
+         * The current IDs of the tabs whose frames use the IDs they had before Safari reloaded the extension, by
+         * those IDs. Safari never gives an ID to two tabs.
+         * @type {Map<number, number>}
+         */
+        this._safariTabIds = new Map();
         /** @type {boolean} */
         this._safariAppExtensionPortKeepsLoaded = false;
         /** @type {?chrome.runtime.Port} */
@@ -769,10 +775,21 @@ export class Backend {
      */
     _onConnect(port) {
         port.onDisconnect.addListener(this._reopenSafariAppExtensionPort.bind(this));
-        if (port.name !== 'tabMessages') { return; }
+        /** @type {import('web-extension').MessagePortDetails} */
+        let portDetails;
+        try {
+            portDetails = parseJson(port.name);
+        } catch (e) {
+            return;
+        }
+        if (typeof portDetails !== 'object' || portDetails === null || portDetails.name !== 'tabMessages') { return; }
         const tabId = port.sender?.tab?.id;
         const frameId = port.sender?.frameId;
         if (typeof tabId !== 'number' || typeof frameId !== 'number') { return; }
+        const frameTabId = portDetails.tabId;
+        if (typeof frameTabId === 'number' && frameTabId !== tabId) {
+            this._safariTabIds.set(frameTabId, tabId);
+        }
 
         let framePorts = this._tabMessagePorts.get(tabId);
         if (typeof framePorts === 'undefined') {
@@ -1543,7 +1560,7 @@ export class Backend {
     /** @type {import('api').ApiHandler<'isTabSearchPopup'>} */
     async _onApiIsTabSearchPopup({tabId}) {
         const baseUrl = chrome.runtime.getURL('/search.html');
-        const tab = typeof tabId === 'number' ? await this._checkTabUrl(tabId, (url) => url !== null && url.startsWith(baseUrl)) : null;
+        const tab = typeof tabId === 'number' ? await this._checkTabUrl(this._getCurrentTabId(tabId), (url) => url !== null && url.startsWith(baseUrl)) : null;
         return (tab !== null);
     }
 
@@ -1651,7 +1668,7 @@ export class Backend {
         /** @type {?chrome.runtime.Port} */
         let sourcePort = chrome.tabs.connect(sourceTabId, {frameId: sourceFrameId, name: JSON.stringify(sourceDetails)});
         /** @type {?chrome.runtime.Port} */
-        let targetPort = chrome.tabs.connect(targetTabId, {frameId: targetFrameId, name: JSON.stringify(targetDetails)});
+        let targetPort = chrome.tabs.connect(this._getCurrentTabId(targetTabId), {frameId: targetFrameId, name: JSON.stringify(targetDetails)});
 
         const cleanup = () => {
             this._checkLastError(chrome.runtime.lastError);
@@ -3133,7 +3150,7 @@ export class Backend {
      */
     async _injectAnkiNoteScreenshot(ankiConnect, timestamp, details) {
         const {tabId, frameId, format, quality} = details;
-        const dataUrl = await this._getScreenshot(tabId, frameId, format, quality);
+        const dataUrl = await this._getScreenshot(this._getCurrentTabId(tabId), frameId, format, quality);
 
         const {mediaType, data} = this._getDataUrlInfo(dataUrl);
         const extension = getFileExtensionFromImageMediaType(mediaType);
@@ -3549,6 +3566,16 @@ export class Backend {
                 }
             });
         });
+    }
+
+    /**
+     * Gets the current ID of a tab that a frame gives by the ID the tab had when the frame started.
+     * See Backend._safariTabIds.
+     * @param {number} tabId
+     * @returns {number}
+     */
+    _getCurrentTabId(tabId) {
+        return this._safariTabIds.get(tabId) ?? tabId;
     }
 
     /**
