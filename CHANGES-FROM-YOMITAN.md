@@ -65,6 +65,8 @@ Along the way it also fixes some performance and layout problems.
     each copy showed its own popup over the other, so a popup that hides when the cursor leaves it needed two exits.
   - `commands.getAll` from a popup crashes the page, so it is read through the backend.
   - Safari has no usable SharedWorker, so images are drawn through the backend.
+  - Clicking a dictionary image opens its tab during the click and shows the image in it once it's read. Safari blocks
+    a tab opened afterwards, so the click did nothing.
   - Missing CSS is worked around:
     - Furigana is kept out of the scan highlight.
     - Monochrome images are drawn on a canvas instead of with a CSS filter.
