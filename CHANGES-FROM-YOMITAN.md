@@ -191,3 +191,6 @@ Along the way it also fixes some performance and layout problems.
   the popup is updated again on the next lookup. Previously lookups stopped working in that page or popup until it
   was reloaded; in a popup, this left nested popups broken.
 - Custom popup styles are only sent to popups whose frame has connected.
+- A collapsible definition's expand button stays inside the definition when an image in it is as wide as the
+  definition, as in 大辞泉 第二版 on a phone. The button was pushed past the definition's edge, so a collapsed
+  definition showed the top of the image and no way to expand it.
