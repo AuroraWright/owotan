@@ -491,7 +491,7 @@ export class AnkiConnect {
                     'Content-Type': 'application/json',
                 },
                 redirect: 'follow',
-                referrerPolicy: 'no-referrer',
+                // No 'no-referrer': Safari then sends `Origin: null`, which AnkiConnect only allows with '*'
                 body: JSON.stringify(body),
             });
         } catch (e) {
