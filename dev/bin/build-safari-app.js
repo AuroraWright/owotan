@@ -336,7 +336,10 @@ if (typeof team === 'string') {
     signing = ['CODE_SIGN_STYLE=Manual', 'CODE_SIGN_IDENTITY=-', 'DEVELOPMENT_TEAM=', 'PROVISIONING_PROFILE_SPECIFIER='];
 }
 const projectPath = path.join(appDirectory, appName, `${appName}.xcodeproj`);
-const derivedDataPath = path.join(appDirectory, 'DerivedData');
+// Spotlight skips folders named .noindex. A copy of the app that it finds can be registered with LaunchServices, as
+// when another app looks the app up, and registering or unregistering a copy removes the extension from Safari, which
+// adds it again at a new address.
+const derivedDataPath = path.join(appDirectory, 'DerivedData.noindex');
 const buildArgs = ['-project', projectPath, '-scheme', platform.scheme, '-configuration', 'Release', '-destination', platform.destination, '-derivedDataPath', derivedDataPath, ...signing];
 if (!args.ipa && !args['app-store'] && !args['developer-id']) {
     run('xcodebuild', [...buildArgs, 'build']);
@@ -392,12 +395,14 @@ if (args['developer-id']) {
     // LaunchServices registers the copies of the app that archiving and exporting make, and keeps the record of a
     // copy after it is deleted, as the one that archiving installs in DerivedData is. Safari then finds no app for the
     // extension when it launches, takes the extension to have been removed, and adds it again turned off, at a new
-    // address that has none of its data. So only the copy that the user installs stays registered.
+    // address that has none of its data. So only the copy that the user installs stays registered, and the exported
+    // copy, which the zip holds, is deleted.
     unregisterApps([
         path.join(derivedDataPath, 'Build', 'Intermediates.noindex', 'ArchiveIntermediates', platform.scheme, 'InstallationBuildProductsLocation', 'Applications', `${appName}.app`),
         path.join(archivePath, 'Products', 'Applications', `${appName}.app`),
         appPath,
     ]);
+    fs.rmSync(appPath, {recursive: true});
     console.log(`Built ${zipPath}`);
 } else if (args.upload) {
     console.log(`Uploaded ${appName} ${version ?? ''} (${buildNumber}) to App Store Connect`);
