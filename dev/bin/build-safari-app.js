@@ -107,6 +107,26 @@ function unregisterApps(appPaths) {
     }
 }
 
+/**
+ * Registers the copy of the app in /Applications again, with its extensions. When a copy of the app is unregistered or
+ * deleted, Safari can take the extension to have been removed, even when PlugInKit still lists the installed copy,
+ * and an hour later it deletes the extension's settings. Registering the extension again makes Safari add it back, at
+ * a new address that it moves the extension's data to.
+ */
+function registerInstalledApp() {
+    const installedPath = path.join('/Applications', `${appName}.app`);
+    if (!fs.existsSync(installedPath)) { return; }
+    const lsregister = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister';
+    execFileSync(lsregister, ['-f', installedPath], {stdio: 'ignore'});
+    const plugInsPath = path.join(installedPath, 'Contents', 'PlugIns');
+    for (const name of fs.readdirSync(plugInsPath)) {
+        if (name.endsWith('.appex')) {
+            execFileSync('pluginkit', ['-a', path.join(plugInsPath, name)], {stdio: 'ignore'});
+        }
+    }
+    console.log(`Registered ${installedPath} again, so that Safari keeps its extension`);
+}
+
 const {values: args} = parseArgs({
     args: process.argv.slice(2),
     options: {
@@ -403,6 +423,7 @@ if (args['developer-id']) {
         appPath,
     ]);
     fs.rmSync(appPath, {recursive: true});
+    registerInstalledApp();
     console.log(`Built ${zipPath}`);
 } else if (args.upload) {
     console.log(`Uploaded ${appName} ${version ?? ''} (${buildNumber}) to App Store Connect`);
