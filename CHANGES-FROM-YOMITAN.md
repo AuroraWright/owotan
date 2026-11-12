@@ -196,3 +196,7 @@ Along the way it also fixes some performance and layout problems.
 - A collapsible definition's expand button stays inside the definition when an image in it is as wide as the
   definition, as in 大辞泉 第二版 on a phone. The button was pushed past the definition's edge, so a collapsed
   definition showed the top of the image and no way to expand it.
+- "Lookup in OwOtan" in the right-click menu works after the background page has stopped. Its click listener was only
+  added once the settings had loaded, too late for the click that starts the background page again, which Safari
+  does whenever the page has been idle. It was also added again on each settings change, so one click could look up
+  the selection several times.

@@ -377,6 +377,13 @@ export class Backend {
             chrome.commands.onCommand.addListener(onCommand);
         }
 
+        // Added before anything is awaited, because Safari unloads the background page when it's idle, and a click on
+        // the menu item starts it again and is then only sent to the listeners that it has at first
+        if (isObjectNotArray(chrome.contextMenus) && isObjectNotArray(chrome.contextMenus.onClicked)) {
+            const onContextMenuClicked = this._onWebExtensionEventWrapper(this._onContextMenuClicked.bind(this));
+            chrome.contextMenus.onClicked.addListener(onContextMenuClicked);
+        }
+
         if (isObjectNotArray(chrome.tabs) && isObjectNotArray(chrome.tabs.onZoomChange)) {
             const onZoomChange = this._onWebExtensionEventWrapper(this._onZoomChange.bind(this));
             chrome.tabs.onZoomChange.addListener(onZoomChange);
@@ -2172,17 +2179,20 @@ export class Backend {
                     title: 'Lookup in OwOtan',
                     contexts: ['selection'],
                 }, () => this._checkLastError(chrome.runtime.lastError));
-                chrome.contextMenus.onClicked.addListener((info) => {
-                    if (info.selectionText) {
-                        this._sendMessageAllTabsIgnoreResponse({action: 'frontendScanSelectedText'});
-                    }
-                });
             } else {
                 chrome.contextMenus.remove('yomitan_lookup', () => this._checkLastError(chrome.runtime.lastError));
             }
         } catch (e) {
             log.error(e);
         }
+    }
+
+    /**
+     * @param {chrome.contextMenus.OnClickData} info
+     */
+    _onContextMenuClicked(info) {
+        if (info.menuItemId !== 'yomitan_lookup' || !info.selectionText) { return; }
+        this._sendMessageAllTabsIgnoreResponse({action: 'frontendScanSelectedText'});
     }
 
     /** */
