@@ -1425,7 +1425,8 @@ class AnkiCardController {
         const markerAliases = new Map([
             ['expression', ['phrase', 'term', 'word']],
             ['reading', ['expression-reading', 'term-reading', 'word-reading']],
-            ['furigana', ['expression-furigana', 'term-furigana', 'word-furigana']],
+            ['furigana', ['term-furigana', 'word-furigana']],
+            ['furigana-plain', ['expression-furigana']],
             ['glossary', ['definition', 'meaning']],
             ['audio', ['sound', 'word-audio', 'term-audio', 'expression-audio']],
             ['dictionary', ['dict']],
